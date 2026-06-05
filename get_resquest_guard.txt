@@ -1,0 +1,40 @@
+import 'package:http/http.dart' as http;
+import 'package:step_flutter/core/error/exceptions.dart';
+
+class GetRequestGuard {
+  final http.Client client;
+  // final Duration _requestTimeout = const Duration(seconds: 20);
+  static const Duration _requestTimeout = Duration(seconds: 20);
+  GetRequestGuard({required this.client});
+  // Método genérico para executar requisição GET e validar status
+  Future<String> guard(Uri uri) async {
+    try {
+      final response = await client.get(uri).timeout(_requestTimeout);
+
+      if (response.statusCode != 200) {
+        throw ServerException();
+      }
+      return response.body;
+    } catch (e) {
+      // Relançar qualquer exceção (timeout, socket, etc.) como ServerException
+      throw ServerException();
+    }
+  }
+}
+
+
+
+//  // Método genérico para executar requisição GET e validar status
+//   Future<String> _getRequest(Uri uri) async {
+//     try {
+//       final response = await client.get(uri).timeout(_requestTimeout);
+
+//       if (response.statusCode != 200) {
+//         throw ServerException();
+//       }
+//       return response.body;
+//     } catch (e) {
+//       // Relançar qualquer exceção (timeout, socket, etc.) como ServerException
+//       throw ServerException();
+//     }
+//   }

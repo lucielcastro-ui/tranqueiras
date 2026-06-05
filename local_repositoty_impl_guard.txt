@@ -1,0 +1,86 @@
+import 'package:dartz/dartz.dart';
+import 'package:step_flutter/core/error/exceptions.dart';
+import 'package:step_flutter/core/error/failures.dart';
+
+class LocalRepositoryImplGuard {
+  Future<Either<Failure, T>> guard<T>(Future<T> Function() action) async {
+    try {
+      return Right(await action());
+    } on CacheException catch (_) {
+      return Left(CacheFailure());
+    } catch (_) {
+      return Left(ExceptionFailure());
+    }
+  }
+}
+
+//   Future<Either<Failure, T>> guard<T>(
+//     Future<T> Function() action, {
+//     bool Function(T)? isEmpty,
+//     required Failure Function()
+//         onEmptyFailure, // agora obrigatório se isEmpty for usado
+//   }) async {
+//     try {
+//       final result = await action();
+
+//       // verifica lista vazia
+//       if (isEmpty != null && isEmpty(result)) {
+//         return Left(onEmptyFailure()); // sem valor padrão problemático
+//       }
+//       return Right(result);
+//     } on CacheException catch (_) {
+//       return Left(CacheFailure());
+//     } catch (_) {
+//       return Left(ExceptionFailure());
+//     }
+//   }
+// }
+
+// Future<Either<Failure, List<PLCodeEntity>>> _getPLCodesLocal(int nucleoId) {
+//   return guard(
+//     () => localDataSource.getPlcodesByNucleo(nucleoId),
+//     isEmpty: (list) => list.isEmpty,
+//     onEmptyFailure: () => ServerFailure(_offlineSemCache), // constante do repositório
+//   );
+// }
+
+  // static const String _offlineSemCache =
+      // 'Dados não disponíveis offline. Conecte-se à internet para atualizar.';
+
+  // Future<Either<Failure, List<NucleoEntity>>> _getNucleosLocal(
+  //     int projectId) async {
+  //   final result = await localGuard.guard(
+  //     () => nucleoLocalDataSource.getNucleosByEmpresaUnidade(projectId),
+  //   );
+
+  //   // 2. Aplica a regra de negócio: se lista vazia, falha específica
+  //   return result.fold(
+  //     (failure) => Left(failure),
+  //     (nucleos) {
+  //       if (nucleos.isEmpty) {
+  //         return Left(ServerFailure(_offlineSemCache));
+  //       }
+  //       return Right(nucleos);
+  //     },
+  //   );
+  // }
+
+//   Future<Either<Failure, List<T>>> _guardLocalWithEmptyCheck<T>(
+//   Future<List<T>> Function() action,
+// ) async {
+//   final result = await guard.guard(action);
+//   return result.fold(
+//     (failure) => Left(failure),
+//     (list) => list.isEmpty 
+//         ? Left(ServerFailure(_offlineSemCache)) 
+//         : Right(list),
+//   );
+// }
+
+// Future<Either<Failure, List<NucleoEntity>>> _getNucleosLocal(
+//     int projectId,
+// ) async {
+//   return _guardLocalWithEmptyCheck(
+//     () => nucleoLocalDataSource.getNucleosByEmpresaUnidade(projectId),
+//   );
+// }

@@ -1,0 +1,57 @@
+import 'dart:convert';
+import 'package:step_flutter/util/get_request_guard.dart';
+
+class ParseResponseAsList {
+  final GetRequestGuard getRequestGuard;
+
+  ParseResponseAsList({required this.getRequestGuard});
+
+  /// Executa a requisição GET usando getRequestGuard e converte a resposta
+  /// JSON em uma lista de objetos do tipo [T].
+  ///
+  /// Se a resposta for um objeto com campo 'data', extrai a lista desse campo.
+  /// Caso contrário, assume que a resposta já é uma lista.
+  ///
+  /// Lança ServerException se a requisição falhar ou status não for 200.
+  /// Lança FormatException se o JSON não for uma lista válida.
+  Future<List<T>> call<T>(
+    Uri uri,
+    T Function(Map<String, dynamic>) fromJson,
+  ) async {
+    final body = await getRequestGuard.guard(uri);
+    final decoded = jsonDecode(body);
+
+    // Se a resposta for um objeto com campo 'data', extrai a lista
+    final data =
+        (decoded is Map<String, dynamic> && decoded.containsKey('data'))
+            ? decoded['data']
+            : decoded;
+
+    if (data is! List) {
+      throw const FormatException('Resposta não é uma lista esperada');
+    }
+
+    return data.whereType<Map<String, dynamic>>().map(fromJson).toList();
+  }
+}
+
+ // Método genérico para parsear resposta JSON como List<T>
+  // Future<List<T>> _parseResponseAsList<T>(
+  //   Uri uri,
+  //   T Function(Map<String, dynamic>) fromJson,
+  // ) async {
+  //   final body = await getRequestGuard.guard(uri);
+  //   final decoded = jsonDecode(body);
+
+  //   // Se a resposta for um objeto com campo 'data', extrai a lista
+  //   final data =
+  //       (decoded is Map<String, dynamic> && decoded.containsKey('data'))
+  //           ? decoded['data']
+  //           : decoded;
+
+  //   if (data is! List) {
+  //     throw const FormatException('Resposta não é uma lista esperada');
+  //   }
+
+  //   return data.whereType<Map<String, dynamic>>().map(fromJson).toList();
+  // }

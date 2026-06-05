@@ -1,0 +1,23 @@
+  // Future<Either<Failure, T>> _guardRemote<T>(
+  //     Future<T> Function() action) async {
+  //   if (!await connectionChecker.isConnected) {
+  //     return Left(NetworkFailure());
+  //   }
+  //   try {
+  //     return Right(await action());
+  //   } on ServerException catch (e) {
+  //     return Left(ServerFailure(e.message));
+  //   } catch (_) {
+  //     return Left(ExceptionFailure());
+  //   }
+  // }
+
+  // Future<Either<Failure, T>> _guardLocal<T>(Future<T> Function() action) async {
+  //   try {
+  //     return Right(await action());
+  //   } on CacheException catch (_) {
+  //     return Left(CacheFailure());
+  //   } catch (_) {
+  //     return Left(ExceptionFailure());
+  //   }
+  // }

@@ -1,0 +1,13 @@
+static List<dynamic> _decodeListPayload(dynamic decoded) {
+    if (decoded is List<dynamic>) return decoded;
+    if (decoded is Map<String, dynamic>) {
+      final data = decoded['data'];
+      if (data is List<dynamic>) return data;
+    }
+    throw const FormatException('Formato do payload inesperado');
+  }
+
+  static Map<String, dynamic> _decodeMapPayload(dynamic decoded) {
+    if (decoded is Map<String, dynamic>) return decoded;
+    throw const FormatException('Formato do payload inesperado');
+  }

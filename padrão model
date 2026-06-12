@@ -1,0 +1,46 @@
+import 'package:step_flutter/features/tasks/domain/entities/task_responsible_entity.dart';
+
+class TaskResponsibleModel extends TaskResponsibleEntity {
+  const TaskResponsibleModel({
+    required super.userId,
+    required super.name,
+  });
+
+  factory TaskResponsibleModel.fromJson(Map<String, dynamic> json) {
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    String? parseNullableString(dynamic value) => value?.toString();
+
+    return TaskResponsibleModel(
+      userId: parseInt(json['id_usuario']),
+      name: parseNullableString(json['nome']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id_usuario': userId,
+        'nome': name,
+      };
+
+  @override
+  TaskResponsibleModel copyWith({
+    int? userId,
+    String? name,
+  }) {
+    return TaskResponsibleModel(
+      userId: userId ?? this.userId,
+      name: name ?? this.name,
+    );
+  }
+
+  factory TaskResponsibleModel.fromEntity(TaskResponsibleEntity entity) {
+    return TaskResponsibleModel(
+      userId: entity.userId,
+      name: entity.name,
+    );
+  }
+}

@@ -1,0 +1,24 @@
+import 'package:equatable/equatable.dart';
+
+class TaskResponsibleEntity extends Equatable {
+  final int userId;
+  final String? name;
+
+  const TaskResponsibleEntity({
+    required this.userId,
+    required this.name,
+  });
+
+  TaskResponsibleEntity copyWith({
+    int? userId,
+    String? name,
+  }) {
+    return TaskResponsibleEntity(
+      userId: userId ?? this.userId,
+      name: name ?? this.name,
+    );
+  }
+
+  @override
+  List<Object?> get props => [userId, name];
+}

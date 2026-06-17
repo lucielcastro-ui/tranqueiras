@@ -44,3 +44,50 @@ class TaskResponsibleModel extends TaskResponsibleEntity {
     );
   }
 }
+import 'package:step_flutter/features/tasks/domain/entities/responsavel_tarefa_entity.dart';
+
+class ResponsavelTarefaModel extends ResponsavelTarefaEntity {
+   const ResponsavelTarefaModel({
+    required super.idUsuario,
+    required super.nome,
+  });
+
+  factory ResponsavelTarefaModel.fromJson(Map<String, dynamic> json) {
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    String? parseNullableString(dynamic value) => value?.toString();
+
+    return ResponsavelTarefaModel(
+      idUsuario: parseInt(json['id_usuario']),
+      nome: parseNullableString(json['nome']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id_usuario': idUsuario,
+        'nome': nome,
+      };
+
+  @override
+  ResponsavelTarefaModel copyWith({
+    int? idUsuario,
+    String? nome,
+  }) {
+    return ResponsavelTarefaModel(
+      idUsuario: idUsuario ?? this.idUsuario,
+      nome: nome ?? this.nome,
+    );
+  }
+
+  factory ResponsavelTarefaModel.fromEntity(ResponsavelTarefaEntity entity) {
+    return ResponsavelTarefaModel(
+      idUsuario: entity.idUsuario,
+      nome: entity.nome,
+    );
+  }
+}
+

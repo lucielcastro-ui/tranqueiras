@@ -1,0 +1,47 @@
+import 'package:step_flutter/features/tasks/domain/entities/task_group_entity.dart';
+
+class TaskGroupModel extends TaskGroupEntity {
+  const TaskGroupModel({
+    required super.taskGroupId,
+    required super.name,
+  });
+
+  factory TaskGroupModel.fromJson(Map<String, dynamic> json) {
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    String parseString(dynamic value) => value?.toString() ?? '';
+
+    return TaskGroupModel(
+      taskGroupId: parseInt(json['id_tarefa_grupo'] ?? json['id_grupo_tarefa']),
+      name: parseString(json['nome']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id_tarefa_grupo': taskGroupId,
+        'id_grupo_tarefa': taskGroupId,
+        'nome': name,
+      };
+
+  @override
+  TaskGroupModel copyWith({
+    int? taskGroupId,
+    String? name,
+  }) {
+    return TaskGroupModel(
+      taskGroupId: taskGroupId ?? this.taskGroupId,
+      name: name ?? this.name,
+    );
+  }
+
+  factory TaskGroupModel.fromEntity(TaskGroupEntity entity) {
+    return TaskGroupModel(
+      taskGroupId: entity.taskGroupId,
+      name: entity.name,
+    );
+  }
+}

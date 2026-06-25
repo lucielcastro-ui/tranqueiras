@@ -1,0 +1,9 @@
+egras de negócio a preservar (iguais ao TaskCard)
+Todas vêm de TaskEntity + tasks_screen:
+
+Permissão: task.canBeExecutedBy(idUser, userLevel) — nível 2 só executa se estiver no grupo responsável.
+Aberta vs fechada: status == 0 e progresso incompleto (_isTaskOpen na lista).
+Sem horários: SendTaskMessage com task.executionMessage + task.executionStatus (1 = no prazo, 2 = atraso, 4 = adiantada).
+Com horários: cada slot → RegisterTaskScheduleExecution; confirmação se |diff| > 15 min (OutOfToleranceDialog).
+Limite de execução: schedules.length ou 1 se vazio.
+Não usar sendMessage para fechar tarefa com horários — só horario_realizado (já documentado no remote datasource).

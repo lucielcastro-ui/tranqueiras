@@ -1,0 +1,1047 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:step_flutter/core/error/failures.dart';
+import 'package:step_flutter/features/tasks/domain/entities/schedule_entity.dart';
+import 'package:step_flutter/features/tasks/domain/entities/task_entity.dart';
+import 'package:step_flutter/features/tasks/domain/usecases/get_schedule_executions_batch_usecase.dart';
+import 'package:step_flutter/features/tasks/domain/utils/schedule_realization_utils.dart';
+import 'package:step_flutter/features/tasks/presentation/bloc/task_bloc.dart';
+import 'package:step_flutter/features/tasks/presentation/widgets/out_of_tolerance_dialog.dart';
+import 'package:step_flutter/features/tasks/presentation/widgets/task_card.dart';
+import 'package:step_flutter/features/tasks/presentation/widgets/task_filter_header.dart';
+import 'package:step_flutter/features/tasks/presentation/screens/details_task_screen.dart';
+import 'package:step_flutter/features/tasks/presentation/widgets/create_task_dialog.dart';
+import 'package:step_flutter/util/apphelper.dart';
+import 'package:step_flutter/util/design_system.dart';
+import 'package:step_flutter/util/get_it.dart';
+import 'package:step_flutter/widgets/snackbar_widget.dart';
+import 'package:step_flutter/widgets/main_tab_header.dart';
+import 'package:step_flutter/widgets/summary_metric_row.dart';
+
+enum TaskFilterType { all, date }
+
+class TasksScreen extends StatefulWidget {
+  final int idUser;
+  final bool isTabActive;
+  final VoidCallback? onNavigateToTasksTab;
+  const TasksScreen({
+    super.key,
+    required this.idUser,
+    this.isTabActive = true,
+    this.onNavigateToTasksTab,
+  });
+  @override
+  State<TasksScreen> createState() => _TasksScreenState();
+}
+
+class _TasksScreenState extends State<TasksScreen> {
+  static const int _detailsSyncBatchSize = 8;
+  TaskFilterType _filterType = TaskFilterType.all;
+  bool _showOpenTasks = true;
+  DateTime _selectedDate = DateTime.now();
+  final Map<String, bool> _expandedCards = {};
+  final Map<String, Map<String, dynamic>> _taskExecutionProgress = {};
+  final Set<String> _syncingTaskIds = {};
+  String? _pendingScheduleExecutionTaskId;
+
+  /// Horário previsto normalizado do slot que está sendo registrado (atualização otimista).
+  String? _pendingScheduleExecutionNormHorario;
+  String? _pendingDirectExecutionTaskId;
+  bool _taskInteractionOpen = false;
+  int _syncExecutionGeneration = 0;
+  int _deferredListRefreshGeneration = 0;
+  int _userLevel = 2;
+  final AppHelper _appHelper = AppHelper();
+  final GetScheduleExecutionsBatchUsecase _getScheduleExecutionsBatchUsecase =
+      getIt<GetScheduleExecutionsBatchUsecase>();
+
+  String _progressStorageKey() =>
+      'task_execution_progress_user_${widget.idUser}';
+
+  Future<void> _loadTaskExecutionProgress() async {
+    final raw =
+        await _appHelper.recuperaParametroSalvoLocal(_progressStorageKey());
+    final value = raw.toString();
+    if (value.isEmpty || value == 'nulo') return;
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is! Map<String, dynamic>) return;
+      if (!mounted) return;
+      setState(() {
+        _taskExecutionProgress
+          ..clear()
+          ..addEntries(decoded.entries.map((entry) {
+            final map = entry.value;
+            if (map is! Map<String, dynamic>) {
+              return MapEntry(
+                entry.key,
+                <String, dynamic>{'done': 0, 'limit': 0},
+              );
+            }
+            final done = map['done'];
+            final limit = map['limit'];
+            final rz = map['realizados'];
+            return MapEntry(
+              entry.key,
+              <String, dynamic>{
+                'done': done is int ? done : int.tryParse('$done') ?? 0,
+                'limit': limit is int ? limit : int.tryParse('$limit') ?? 0,
+                if (rz is List)
+                  'realizados': rz.map((e) => e.toString()).toList(),
+              },
+            );
+          }));
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveTaskExecutionProgress() async {
+    await _appHelper.salvarParametroLocal(
+      key: _progressStorageKey(),
+      value: jsonEncode(_taskExecutionProgress),
+    );
+  }
+
+  String? _executionStatusLabelForTask(TaskEntity task) {
+    final limit = _executionLimitForTask(task);
+    if (task.status != 0) {
+      return 'Status execução: Finalizada ($limit/$limit)';
+    }
+    final progress = _taskExecutionProgress[task.taskId];
+    if (task.schedules.isNotEmpty) {
+      if (progress == null) return null;
+      var done = _realizedScheduleIndicesForTask(task).length;
+      if (done > limit) done = limit;
+      final finalized = done >= limit;
+      final label = finalized ? 'Finalizada' : 'Em andamento';
+      return 'Status execução: $label ($done/$limit)';
+    }
+    if (progress == null) return null;
+    final execution =
+        _resolveExecutionProgress(task, done: progress['done'] ?? 0);
+    final done = execution.done;
+    final execLimit = execution.limit;
+    final finalized = execution.isClosed;
+    final label = finalized ? 'Finalizada' : 'Em andamento';
+    return 'Status execução: $label ($done/$execLimit)';
+  }
+
+  /// Índices em [task.schedules] realizados no servidor (`realizados` no prefs ou fallback).
+  Set<int> _realizedScheduleIndicesForTask(TaskEntity task) {
+    if (task.schedules.isEmpty) return {};
+    if (task.status != 0) {
+      return {for (var i = 0; i < task.schedules.length; i++) i};
+    }
+    final p = _taskExecutionProgress[task.taskId];
+    if (p == null) return {};
+    final rz = p['realizados'];
+    if (rz is List && rz.isNotEmpty) {
+      final pool = rz.map((e) => e.toString()).toList();
+      return scheduleIndicesFromNormalizedRealizadosPool(task, pool);
+    }
+    final done = p['done'] as int? ?? 0;
+    return {
+      for (var i = 0; i < task.schedules.length && i < done; i++) i,
+    };
+  }
+
+  Future<void> _loadUserLevel() async {
+    final raw = await AppHelper().recuperaParametroSalvoLocal('nivel');
+    final level = int.tryParse(raw.toString()) ?? 2;
+    if (mounted) setState(() => _userLevel = level);
+  }
+
+  void _loadTasks() {
+    if (widget.idUser <= 0) return;
+    if (_filterType == TaskFilterType.all) {
+      context.read<TaskBloc>().add(GetTasks(widget.idUser));
+    } else {
+      context
+          .read<TaskBloc>()
+          .add(GetTasksByDate(idUser: widget.idUser, date: _selectedDate));
+    }
+  }
+
+  void _executeTask(TaskEntity task) {
+    if (!task.canBeExecutedBy(widget.idUser, _userLevel)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Sem permissão para finalizar tarefa.')));
+      return;
+    }
+    context.read<TaskBloc>().add(SendTaskMessage(
+          idUser: widget.idUser,
+          task: task,
+          message: task.executionMessage,
+          messageStatus: task.executionStatus,
+          photoUrl: 'img',
+          refreshTasksListForDate:
+              _filterType == TaskFilterType.date ? _selectedDate : null,
+        ));
+    setState(() {
+      _pendingDirectExecutionTaskId = task.taskId;
+    });
+  }
+
+  /// Aberta vs fechada: [TaskEntity.status] (`0` = aberta) e progresso local completo.
+  bool _isTaskOpen(TaskEntity task) {
+    if (task.status != 0) return false;
+    final progress = _taskExecutionProgress[task.taskId];
+    final limit = _executionLimitForTask(task);
+    if (progress == null) {
+      // Sem cache local: confia no status da API até o lote de horários sincronizar.
+      return true;
+    }
+    if (task.schedules.isNotEmpty) {
+      return _realizedScheduleIndicesForTask(task).length < limit;
+    }
+    final done = progress['done'] as int? ?? 0;
+    return done < limit;
+  }
+
+  int _executionLimitForTask(TaskEntity task) {
+    final schedulesCount = task.schedules.length;
+    return schedulesCount > 0 ? schedulesCount : 1;
+  }
+
+  /// Um item na pool por slot de [task.schedules] (previsto normalizado), para gravar concluído total.
+  List<String> _normalizedPrevistoPoolAllSlots(TaskEntity task) {
+    return task.schedules
+        .map((s) => normalizeHorarioParaComparacao(s.time))
+        .where((t) => t.isNotEmpty)
+        .toList();
+  }
+
+  _TaskExecutionProgress _resolveExecutionProgress(
+    TaskEntity task, {
+    required int done,
+    int? limitOverride,
+  }) {
+    final limit = limitOverride ?? _executionLimitForTask(task);
+    var resolvedDone = done;
+    // Regra de consistência: se o backend já fechou a subtarefa (status != 0),
+    // força execução completa (todos os horários ou 1/1 sem horários).
+    if (task.status != 0) {
+      resolvedDone = limit;
+    }
+    final normalizedDone =
+        resolvedDone < 0 ? 0 : (resolvedDone > limit ? limit : resolvedDone);
+    return _TaskExecutionProgress(
+      done: normalizedDone,
+      limit: limit,
+      isOpen: normalizedDone < limit,
+    );
+  }
+
+  int _mainTaskId(TaskEntity task) {
+    final normalized = task.taskId.split('.').first;
+    final parsed = int.tryParse(normalized);
+    if (parsed != null && parsed > 0) return parsed;
+    if (task.parentId > 0) return task.parentId;
+    return 0;
+  }
+
+  /// Progresso local padrão sem chamar chat (evita rajada de GET no servidor).
+  void _seedDefaultExecutionProgress(TaskEntity task) {
+    if (_taskExecutionProgress.containsKey(task.taskId)) return;
+    final limit = _executionLimitForTask(task);
+    if (task.status != 0) {
+      final normPool = task.schedules.isNotEmpty
+          ? _normalizedPrevistoPoolAllSlots(task)
+          : <String>[];
+      _taskExecutionProgress[task.taskId] = {
+        'done': limit,
+        'limit': limit,
+        if (normPool.isNotEmpty) 'realizados': normPool,
+      };
+      return;
+    }
+    _taskExecutionProgress[task.taskId] = {
+      'done': 0,
+      'limit': limit,
+    };
+  }
+
+  Future<void> _pruneExecutionCaches(List<TaskEntity> tasks) async {
+    final validIds = tasks.map((task) => task.taskId).toSet();
+    final progressKeysToRemove = _taskExecutionProgress.keys
+        .where((key) => !validIds.contains(key))
+        .toList();
+    if (progressKeysToRemove.isEmpty) return;
+    setState(() {
+      for (final key in progressKeysToRemove) {
+        _taskExecutionProgress.remove(key);
+      }
+    });
+    await _saveTaskExecutionProgress();
+  }
+
+  /// Sincroniza progresso local com [TaskEntity.status] do backend (`0` = aberta).
+  void _applyBackendStatusToProgress(List<TaskEntity> tasks) {
+    var changed = false;
+    for (final task in tasks) {
+      if (task.status == 0) continue;
+      final limit = _executionLimitForTask(task);
+      final normPool = task.schedules.isNotEmpty
+          ? _normalizedPrevistoPoolAllSlots(task)
+          : <String>[];
+      final current = _taskExecutionProgress[task.taskId];
+      final currentDone = current?['done'] as int? ?? 0;
+      if (currentDone >= limit &&
+          (normPool.isEmpty ||
+              (current?['realizados'] as List?)?.length == normPool.length)) {
+        continue;
+      }
+      _taskExecutionProgress[task.taskId] = {
+        'done': limit,
+        'limit': limit,
+        if (normPool.isNotEmpty) 'realizados': normPool,
+      };
+      changed = true;
+    }
+    if (changed && mounted) setState(() {});
+  }
+
+  List<TaskEntity> _tasksNeedingScheduleSync(List<TaskEntity> tasks) {
+    return tasks.where((task) {
+      if (_syncingTaskIds.contains(task.taskId)) return false;
+      if (task.schedules.isEmpty) return false;
+      if (task.status != 0) return false;
+      final limit = _executionLimitForTask(task);
+      final done = _realizedScheduleIndicesForTask(task).length;
+      return done < limit;
+    }).toList();
+  }
+
+  Future<void> _syncExecutionProgressBatch(
+    List<TaskEntity> candidates,
+    int generation,
+  ) async {
+    if (candidates.isEmpty) return;
+    bool isStale() =>
+        !mounted ||
+        generation != _syncExecutionGeneration ||
+        _taskInteractionOpen;
+
+    for (final task in candidates) {
+      _syncingTaskIds.add(task.taskId);
+    }
+    if (isStale()) {
+      for (final task in candidates) {
+        _syncingTaskIds.remove(task.taskId);
+      }
+      return;
+    }
+
+    final batchIds = candidates.map((task) => task.taskId).toList();
+    final batchResult = await _getScheduleExecutionsBatchUsecase(
+      GetScheduleExecutionsBatchParams(subTaskIds: batchIds),
+    );
+    if (isStale()) {
+      for (final task in candidates) {
+        _syncingTaskIds.remove(task.taskId);
+      }
+      return;
+    }
+
+    batchResult.fold(
+      (_) {
+        if (!mounted) return;
+        setState(() {
+          for (final task in candidates) {
+            if (task.status != 0) {
+              _seedDefaultExecutionProgress(task);
+            }
+          }
+        });
+        for (final task in candidates) {
+          _syncingTaskIds.remove(task.taskId);
+        }
+      },
+      (bySubTask) {
+        if (!mounted) return;
+        setState(() {
+          for (final task in candidates) {
+            final limit = _executionLimitForTask(task);
+            if (task.status != 0) {
+              final normPool = task.schedules.isNotEmpty
+                  ? _normalizedPrevistoPoolAllSlots(task)
+                  : <String>[];
+              _taskExecutionProgress[task.taskId] = {
+                'done': limit,
+                'limit': limit,
+                if (normPool.isNotEmpty) 'realizados': normPool,
+              };
+              _syncingTaskIds.remove(task.taskId);
+              continue;
+            }
+            final entries = bySubTask[task.taskId] ?? const [];
+            final normPoolFromApi = normalizedRealizadosFromEntries(entries);
+            final prevRz =
+                (_taskExecutionProgress[task.taskId]?['realizados'] as List?)
+                        ?.map((e) => e.toString())
+                        .toList() ??
+                    <String>[];
+            final normPool = normPoolFromApi.length >= prevRz.length
+                ? normPoolFromApi
+                : prevRz;
+            final indices =
+                scheduleIndicesFromNormalizedRealizadosPool(task, normPool);
+            var done = indices.length;
+            if (done > limit) done = limit;
+            _taskExecutionProgress[task.taskId] = {
+              'done': done,
+              'limit': limit,
+              'realizados': normPool,
+            };
+            _syncingTaskIds.remove(task.taskId);
+          }
+        });
+      },
+    );
+  }
+
+  Future<void> _syncExecutionProgressForTasks(
+    List<TaskEntity> tasks, {
+    String? prioritizeSubTaskId,
+  }) async {
+    final generation = ++_syncExecutionGeneration;
+    bool isStale() =>
+        !mounted ||
+        generation != _syncExecutionGeneration ||
+        _taskInteractionOpen;
+
+    _applyBackendStatusToProgress(tasks);
+
+    for (final task in tasks) {
+      if (task.schedules.isEmpty &&
+          !_taskExecutionProgress.containsKey(task.taskId)) {
+        _seedDefaultExecutionProgress(task);
+      }
+    }
+
+    var pending = _tasksNeedingScheduleSync(tasks);
+    if (prioritizeSubTaskId != null && prioritizeSubTaskId.isNotEmpty) {
+      final i = pending.indexWhere((t) => t.taskId == prioritizeSubTaskId);
+      if (i > 0) {
+        final t = pending.removeAt(i);
+        pending.insert(0, t);
+      }
+    }
+
+    while (pending.isNotEmpty) {
+      if (isStale()) break;
+      final chunk = pending.take(_detailsSyncBatchSize).toList();
+      await _syncExecutionProgressBatch(chunk, generation);
+      if (isStale()) break;
+      pending = _tasksNeedingScheduleSync(tasks);
+    }
+
+    await _saveTaskExecutionProgress();
+  }
+
+  void _scheduleListRefreshAfterInteraction() {
+    final generation = ++_deferredListRefreshGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      if (!mounted || _taskInteractionOpen) return;
+      if (generation != _deferredListRefreshGeneration) return;
+      _loadTasks();
+    });
+  }
+
+  Future<void> _openTaskInteraction(TaskEntity task) async {
+    _deferredListRefreshGeneration++;
+    _syncExecutionGeneration++;
+    _taskInteractionOpen = true;
+
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BlocProvider<TaskBloc>.value(
+          value: context.read<TaskBloc>(),
+          child: DetailsTaskScreen(
+            key: ValueKey('task_interaction_${task.taskId}'),
+            idUser: widget.idUser,
+            task: task,
+            initialRealizedScheduleIndices:
+                _realizedScheduleIndicesForTask(task),
+            initialIsOpenInList: _isTaskOpen(task),
+            initialExecutionStatusLabel: _executionStatusLabelForTask(task),
+          ),
+        ),
+      ),
+    );
+    _taskInteractionOpen = false;
+    if (!mounted) return;
+    if (result is Map) {
+      final taskId = result['taskId']?.toString();
+      final executionsDone = result['executionsDone'];
+      final returnedDone = executionsDone is int ? executionsDone : 0;
+      if (taskId != null && taskId.isNotEmpty) {
+        final previousDone = _taskExecutionProgress[taskId]?['done'] ?? 0;
+        // Nunca regride progresso ao voltar de detalhes.
+        final safeDone =
+            returnedDone >= previousDone ? returnedDone : previousDone;
+        final execution = _resolveExecutionProgress(task, done: safeDone);
+        final returnedRz = result['realizados'];
+        final prevRz = returnedRz is List
+            ? returnedRz.map((e) => e.toString()).toList()
+            : (_taskExecutionProgress[taskId]?['realizados'] as List?)
+                ?.map((e) => e.toString())
+                .toList();
+        setState(() {
+          _taskExecutionProgress[taskId] = {
+            'done': execution.done,
+            'limit': execution.limit,
+            if (prevRz != null && prevRz.isNotEmpty) 'realizados': prevRz,
+          };
+        });
+        await _saveTaskExecutionProgress();
+      }
+    }
+    final blocTasks = context.read<TaskBloc>().state.tasks;
+    if (blocTasks.isNotEmpty) {
+      _applyBackendStatusToProgress(blocTasks);
+      await _syncExecutionProgressForTasks(blocTasks,
+          prioritizeSubTaskId: task.taskId);
+    }
+    _scheduleListRefreshAfterInteraction();
+  }
+
+  String _formatTimeOfDay(TimeOfDay time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _nowAsApiTime() {
+    final now = DateTime.now();
+    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+  }
+
+  int _timeDiffInMinutes(String scheduledTime) {
+    final parts = scheduledTime.split(':');
+    if (parts.length < 2) return 0;
+    final now = DateTime.now();
+    final hour = int.tryParse(parts[0]) ?? now.hour;
+    final minute = int.tryParse(parts[1]) ?? now.minute;
+    final scheduled = DateTime(now.year, now.month, now.day, hour, minute);
+    return now.difference(scheduled).inMinutes;
+  }
+
+  Future<bool> _confirmOutOfTolerance({
+    required String scheduledTime,
+    required int diffMinutes,
+  }) {
+    return OutOfToleranceDialog.show(
+      context,
+      scheduledTime: scheduledTime,
+      nowText: _formatTimeOfDay(TimeOfDay.now()),
+      diffMinutes: diffMinutes,
+    );
+  }
+
+  Future<void> _registerTaskScheduleExecution(
+    TaskEntity task,
+    ScheduleEntity schedule,
+  ) async {
+    if (_pendingScheduleExecutionTaskId != null) return;
+    final diff = _timeDiffInMinutes(schedule.time);
+    if (diff.abs() > 15) {
+      final confirm = await _confirmOutOfTolerance(
+        scheduledTime: schedule.time,
+        diffMinutes: diff,
+      );
+      if (!confirm) return;
+    }
+    final mainTaskId = _mainTaskId(task);
+    if (mainTaskId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível identificar a tarefa.')),
+      );
+      return;
+    }
+    setState(() {
+      _pendingScheduleExecutionTaskId = task.taskId;
+      _pendingScheduleExecutionNormHorario =
+          normalizeHorarioParaComparacao(schedule.time);
+    });
+    context.read<TaskBloc>().add(
+          RegisterTaskScheduleExecution(
+            subTaskId: task.taskId,
+            idUser: widget.idUser,
+            idTask: mainTaskId,
+            scheduleTime: schedule.time,
+            executedTime: _nowAsApiTime(),
+            idScheduleExecution: schedule.taskScheduleId,
+            createAttendance: true,
+            refreshTasksListForDate:
+                _filterType == TaskFilterType.date ? _selectedDate : null,
+          ),
+        );
+  }
+
+  Future<void> _showCreateTaskDialog() async {
+    final taskBloc = context.read<TaskBloc>();
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (_) => CreateTaskDialog(
+        idUser: widget.idUser,
+        taskBloc: taskBloc,
+        onTaskCreated: () {
+          _loadTasks();
+          widget.onNavigateToTasksTab?.call();
+        },
+      ),
+    );
+    if (created == true && mounted) {
+      showSnackBar(context, true, 'Tarefa criada com sucesso.');
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant TasksScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final idChanged = oldWidget.idUser != widget.idUser && widget.idUser > 0;
+    final tabActivated = !oldWidget.isTabActive && widget.isTabActive;
+    if (idChanged) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _loadTasks();
+      });
+      return;
+    }
+    if (tabActivated && widget.idUser > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _ensureTasksLoaded();
+      });
+    }
+  }
+
+  void _ensureTasksLoaded() {
+    if (widget.idUser <= 0) return;
+    final blocState = context.read<TaskBloc>().state;
+    final needsLoad = blocState is TaskInitial ||
+        (blocState.tasks.isEmpty &&
+            blocState is! TaskLoading &&
+            blocState is! TaskCacheLoaded);
+    if (needsLoad) {
+      _loadTasks();
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _bootstrapScreenState();
+    });
+  }
+
+  Future<void> _bootstrapScreenState() async {
+    await _loadTaskExecutionProgress();
+    await _loadUserLevel();
+    if (!mounted) return;
+    final blocTasks = context.read<TaskBloc>().state.tasks;
+    if (blocTasks.isNotEmpty) {
+      _applyBackendStatusToProgress(blocTasks);
+    }
+    if (widget.isTabActive) {
+      _ensureTasksLoaded();
+    }
+  }
+
+  Widget _buildTaskSummaryMetrics({
+    required int total,
+    required int openCount,
+    required int closedCount,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        DesignSystem.spacingM,
+        0,
+        DesignSystem.spacingM,
+        DesignSystem.spacingM,
+      ),
+      child: SummaryMetricRow(
+        sectionTitle: 'Resumo',
+        items: [
+          SummaryMetricItem(
+            label: 'Total',
+            value: '$total',
+            icon: Icons.assignment_outlined,
+            accentColor: DesignSystem.info,
+          ),
+          SummaryMetricItem(
+            label: 'Abertas',
+            value: '$openCount',
+            icon: Icons.schedule_outlined,
+            accentColor: Colors.orange.shade700,
+          ),
+          SummaryMetricItem(
+            label: 'Fechadas',
+            value: '$closedCount',
+            icon: Icons.check_circle_outline,
+            accentColor: DesignSystem.primaryGreen,
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: DesignSystem.grey50,
+      body: BlocListener<TaskBloc, TaskState>(
+        listener: (context, state) async {
+          if (ModalRoute.of(context)?.isCurrent != true) return;
+          String? prioritizeSubTaskIdForSync;
+          // Evita snack genérico ao falhar criação (já há feedback no diálogo).
+          if (state is TaskError &&
+              state.tasks.isNotEmpty &&
+              state.failure is NetworkFailure) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Falha ao sincronizar tarefas.')),
+            );
+          }
+          if (state is TaskError && _pendingScheduleExecutionTaskId != null) {
+            setState(() {
+              _pendingScheduleExecutionTaskId = null;
+              _pendingScheduleExecutionNormHorario = null;
+            });
+          }
+          if (state is TaskError && _pendingDirectExecutionTaskId != null) {
+            setState(() {
+              _pendingDirectExecutionTaskId = null;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Falha ao executar tarefa.')),
+            );
+          }
+          if (state is TaskLoaded && _pendingScheduleExecutionTaskId != null) {
+            prioritizeSubTaskIdForSync = _pendingScheduleExecutionTaskId;
+            final tid = _pendingScheduleExecutionTaskId!;
+            final normH = _pendingScheduleExecutionNormHorario;
+            TaskEntity? execTask;
+            for (final t in state.tasks) {
+              if (t.taskId == tid) {
+                execTask = t;
+                break;
+              }
+            }
+            setState(() {
+              if (execTask != null &&
+                  execTask.schedules.isNotEmpty &&
+                  normH != null &&
+                  normH.isNotEmpty) {
+                final prev = _taskExecutionProgress[tid];
+                final prevPool = (prev?['realizados'] as List?)
+                        ?.map((e) => e.toString())
+                        .toList() ??
+                    <String>[];
+                final nextPool = [...prevPool, normH];
+                final limit = _executionLimitForTask(execTask);
+                final indices = scheduleIndicesFromNormalizedRealizadosPool(
+                  execTask,
+                  nextPool,
+                );
+                var done = indices.length;
+                if (done > limit) done = limit;
+                _taskExecutionProgress[tid] = {
+                  'done': done,
+                  'limit': limit,
+                  'realizados': nextPool,
+                };
+              }
+              _pendingScheduleExecutionTaskId = null;
+              _pendingScheduleExecutionNormHorario = null;
+            });
+            await _saveTaskExecutionProgress();
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Horário realizado com sucesso.')),
+            );
+          }
+          if (state is TaskLoaded && _pendingDirectExecutionTaskId != null) {
+            final taskId = _pendingDirectExecutionTaskId!;
+            final previous = _taskExecutionProgress[taskId];
+            final task = state.tasks.cast<TaskEntity?>().firstWhere(
+                  (item) => item?.taskId == taskId,
+                  orElse: () => null,
+                );
+            final fallbackLimit =
+                task != null ? _executionLimitForTask(task) : 1;
+            final limit = previous?['limit'] ?? fallbackLimit;
+            // Execução direta (sem horário): ao sucesso fecha imediatamente.
+            final normalizedDone = limit;
+            final prevRz = _taskExecutionProgress[taskId]?['realizados'];
+            setState(() {
+              _taskExecutionProgress[taskId] = {
+                'done': normalizedDone,
+                'limit': limit,
+                if (prevRz is List) 'realizados': prevRz,
+              };
+              _pendingDirectExecutionTaskId = null;
+            });
+            _saveTaskExecutionProgress();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Tarefa executada com sucesso.')),
+            );
+          }
+          if (state is TaskCacheLoaded && state.tasks.isNotEmpty) {
+            if (!mounted || _taskInteractionOpen) return;
+            _applyBackendStatusToProgress(state.tasks);
+          }
+          // Só sincroniza após a lista remota — evita POST em lote duplicado
+          // (TaskCacheLoaded + TaskLoaded) que competia com o GET do chat (429).
+          if (state is TaskLoaded && state.tasks.isNotEmpty) {
+            await _pruneExecutionCaches(state.tasks);
+            if (!mounted || _taskInteractionOpen) return;
+            _applyBackendStatusToProgress(state.tasks);
+            await _syncExecutionProgressForTasks(
+              state.tasks,
+              prioritizeSubTaskId: prioritizeSubTaskIdForSync,
+            );
+          }
+        },
+        child: BlocBuilder<TaskBloc, TaskState>(
+          builder: (context, state) {
+            final rawTasks = state.tasks;
+            final openCount =
+                rawTasks.where((task) => _isTaskOpen(task)).length;
+            final closedCount =
+                rawTasks.where((task) => !_isTaskOpen(task)).length;
+            final statusCountLabel = _filterType == TaskFilterType.all
+                ? (_showOpenTasks
+                    ? '$openCount abertas'
+                    : '$closedCount fechadas')
+                : '${rawTasks.length} tarefas';
+
+            Widget content;
+            if (state is TaskLoading && state.tasks.isEmpty) {
+              content = const Center(child: CircularProgressIndicator());
+            } else if (state is TaskError && state.tasks.isEmpty) {
+              content = Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        color: DesignSystem.error,
+                        size: 36,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Não foi possível carregar tarefas.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _loadTasks,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Tentar novamente'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            } else {
+              final tasks = _filterType == TaskFilterType.all
+                  ? rawTasks
+                      .where((task) => _showOpenTasks
+                          ? _isTaskOpen(task)
+                          : !_isTaskOpen(task))
+                      .toList()
+                  : rawTasks;
+              if (tasks.isEmpty) {
+                content = Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.assignment_outlined,
+                        color: DesignSystem.grey300,
+                        size: 48,
+                      ),
+                      const SizedBox(height: DesignSystem.spacingS),
+                      const Text(
+                        'Nenhuma tarefa encontrada',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: DesignSystem.fontFamily,
+                          color: DesignSystem.grey800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Ajuste os filtros ou crie uma nova tarefa',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontFamily: DesignSystem.fontFamily,
+                          color: DesignSystem.grey600,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              } else {
+                content = RefreshIndicator(
+                  onRefresh: () async => _loadTasks(),
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    itemCount: tasks.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (_, index) {
+                      final task = tasks[index];
+                      return TaskCard(
+                        task: task,
+                        isOpenInList: _isTaskOpen(task),
+                        executionStatusLabel:
+                            _executionStatusLabelForTask(task),
+                        realizedScheduleIndices:
+                            _realizedScheduleIndicesForTask(task),
+                        isExpanded: _expandedCards[task.taskId] ?? false,
+                        isExecuteLoading:
+                            _pendingDirectExecutionTaskId == task.taskId,
+                        onExpandToggle: () => setState(() {
+                          _expandedCards[task.taskId] =
+                              !(_expandedCards[task.taskId] ?? false);
+                        }),
+                        onOpenInteraction: () => _openTaskInteraction(task),
+                        onExecute: () => _executeTask(task),
+                        onScheduleTap: (schedule) =>
+                            _registerTaskScheduleExecution(task, schedule),
+                      );
+                    },
+                  ),
+                );
+              }
+            }
+
+            return Column(
+              children: [
+                MainTabHeader.withCreate(
+                  title: 'Tarefas',
+                  backgroundColor: Colors.transparent,
+                  onCreate: _showCreateTaskDialog,
+                  // showBottomBorder: true,
+                ),
+                if (state is! TaskLoading || state.tasks.isNotEmpty)
+                  _buildTaskSummaryMetrics(
+                    total: rawTasks.length,
+                    openCount: openCount,
+                    closedCount: closedCount,
+                  ),
+                TaskFilterHeader(
+                  isDateSelected: _filterType == TaskFilterType.date,
+                  showOpenStatus: _showOpenTasks,
+                  selectedDate: _selectedDate,
+                  onSelectGroup: () {
+                    if (_filterType == TaskFilterType.all) return;
+                    setState(() {
+                      _filterType = TaskFilterType.all;
+                      _showOpenTasks = true;
+                    });
+                    _loadTasks();
+                  },
+                  onSelectDate: () {
+                    if (_filterType == TaskFilterType.date) return;
+                    setState(() {
+                      _filterType = TaskFilterType.date;
+                    });
+                    _loadTasks();
+                  },
+                  onPreviousDate: () => setState(() {
+                    _selectedDate = _selectedDate.add(const Duration(days: -1));
+                    _loadTasks();
+                  }),
+                  onNextDate: () => setState(() {
+                    _selectedDate = _selectedDate.add(const Duration(days: 1));
+                    _loadTasks();
+                  }),
+                  onSelectOpenStatus: () {
+                    if (_showOpenTasks) return;
+                    setState(() {
+                      _showOpenTasks = true;
+                    });
+                  },
+                  onSelectClosedStatus: () {
+                    if (!_showOpenTasks) return;
+                    setState(() {
+                      _showOpenTasks = false;
+                    });
+                  },
+                ),
+                // Container(
+                //   width: double.infinity,
+                //   padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                //   decoration: const BoxDecoration(
+                //     color: Colors.white,
+                //     border: Border(
+                //       bottom: BorderSide(color: DesignSystem.grey200),
+                //     ),
+                //   ),
+                //   child: Row(
+                //     children: [
+                //       Expanded(
+                //         child: Text(
+                //           _filterType == TaskFilterType.all
+                //               ? 'Visualização: ${_showOpenTasks ? 'Abertas' : 'Fechadas'}'
+                //               : 'Visualização: Data',
+                //           style: const TextStyle(
+                //             fontSize: 12,
+                //             color: DesignSystem.grey600,
+                //             fontWeight: FontWeight.w600,
+                //           ),
+                //         ),
+                //       ),
+                //       Container(
+                //         padding: const EdgeInsets.symmetric(
+                //             horizontal: 10, vertical: 4),
+                //         decoration: BoxDecoration(
+                //           color:
+                //               DesignSystem.primaryGreen.withValues(alpha: 0.12),
+                //           borderRadius: BorderRadius.circular(14),
+                //         ),
+                //         child: Text(
+                //           statusCountLabel,
+                //           style: const TextStyle(
+                //             fontSize: 12,
+                //             fontWeight: FontWeight.bold,
+                //             color: DesignSystem.grey800,
+                //           ),
+                //         ),
+                //       ),
+                //     ],
+                //   ),
+                // ),
+                Expanded(child: content),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _TaskExecutionProgress {
+  final int done;
+  final int limit;
+  final bool isOpen;
+
+  const _TaskExecutionProgress({
+    required this.done,
+    required this.limit,
+    required this.isOpen,
+  });
+
+  bool get isClosed => !isOpen;
+}

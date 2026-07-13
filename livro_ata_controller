@@ -1,0 +1,40 @@
+// ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'package:flutter/material.dart';
+import 'package:step_flutter/domain/usecases/get_livro_ata_usecase.dart';
+import 'package:step_flutter/model/ata_livro_model.dart';
+import 'package:step_flutter/util/apphelper.dart';
+
+class LivrosAtaController extends ChangeNotifier {
+  final GetLivroAtaUsecase _getLivroAtaUsecase;
+
+  LivrosAtaController({
+    required GetLivroAtaUsecase getLivroAtaUsecase,
+  }) : _getLivroAtaUsecase = getLivroAtaUsecase;
+
+  late final String idUsuario;
+
+  late final String errorMessage;
+
+  ValueNotifier<bool> carregando = ValueNotifier(false);
+  List<AtaLivroModel> livrosAta = [];
+
+  void init() async {
+    idUsuario = await AppHelper().recuperaParametroSalvoLocal("id_usuario")!;
+
+    carregando.value = true;
+    notifyListeners();
+
+    var response = await _getLivroAtaUsecase(int.parse(idUsuario));
+    carregando.value = false;
+
+    response.fold(
+      (l) {
+        errorMessage = l.toString();
+      },
+      (r) {
+        livrosAta = r;
+      },
+    );
+    notifyListeners();
+  }
+}

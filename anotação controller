@@ -1,0 +1,382 @@
+import 'dart:developer';
+import 'dart:io';
+
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/material.dart';
+
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:step_flutter/domain/usecases/add_anotacao_ata_usecase.dart';
+import 'package:step_flutter/domain/usecases/finalizar_turno_usecase.dart';
+import 'package:step_flutter/domain/usecases/get_anotacoes_ata_usecase.dart';
+import 'package:step_flutter/domain/usecases/photo_upload_usecase.dart';
+import 'package:step_flutter/features/livro_ata/data/models/finalizar_turno_model.dart';
+import 'package:step_flutter/l10n/app_localizations.dart';
+import 'package:step_flutter/model/ata_anotacao_model.dart';
+import 'package:step_flutter/model/filtro_model.dart';
+// import 'package:step_flutter/model/finalizar_turno_model.dart';
+import 'package:step_flutter/model/livro_ata_anotacoes_model.dart';
+import 'package:step_flutter/util/apphelper.dart';
+import 'package:step_flutter/util/cores.dart';
+import 'package:step_flutter/util/get_it.dart';
+import 'package:step_flutter/widgets/snackbar_widget.dart';
+import 'package:top_snackbar_flutter/custom_snack_bar.dart';
+import 'package:top_snackbar_flutter/top_snack_bar.dart';
+
+class AnotacoesLivroAtaController extends ChangeNotifier {
+  final GetAnotacoesAtaUsecase _anotacoesAtaUsecase;
+  final AddAnotacaoAtaUsecase _addAnotacaoAtaUsecase;
+  final PhotoUploadUsecase _photoUploadUsecase;
+  final FinalizarTurnoUsecase _finalizarTurnoUsecase;
+
+  AnotacoesLivroAtaController({
+    required GetAnotacoesAtaUsecase anotacoesAtaUsecase,
+    required AddAnotacaoAtaUsecase addAnotacaoAtaUsecase,
+    required PhotoUploadUsecase photoUploadUsecase,
+    required FinalizarTurnoUsecase finalizarTurnoUsecase,
+  })  : _anotacoesAtaUsecase = anotacoesAtaUsecase,
+        _addAnotacaoAtaUsecase = addAnotacaoAtaUsecase,
+        _photoUploadUsecase = photoUploadUsecase,
+        _finalizarTurnoUsecase = finalizarTurnoUsecase;
+
+  late final String idUsuario;
+  late final String idEmpresa;
+
+  late final String errorMessage;
+
+  late final int _idLivroAta;
+  String relatorio = '';
+
+  ValueNotifier<bool> carregando = ValueNotifier(false);
+
+  List<AtaAnotacaoModel> anotacaoes = [];
+
+  TextEditingController descricaoAnotacaoController = TextEditingController();
+  TextEditingController deDataController = TextEditingController();
+  TextEditingController ateDataController = TextEditingController();
+  TextEditingController nomeController = TextEditingController();
+
+  ValueNotifier<String> deData = ValueNotifier('');
+  String deDataOriginal = "";
+  ValueNotifier<String> ateData = ValueNotifier('');
+  String ateDataOriginal = "";
+
+  ValueNotifier<List<XFile>> fotoAnotacao = ValueNotifier([]);
+  final ImagePicker picker = ImagePicker();
+
+  final ScrollController scrollController = ScrollController();
+
+  int currentPage = 1;
+
+  final formKey = GlobalKey<FormState>();
+  final filtroKey = GlobalKey<FormState>();
+
+  ValueNotifier<bool> enableButton = ValueNotifier(false);
+
+  ValueNotifier<bool> loading = ValueNotifier(false);
+  ValueNotifier<bool> uploading = ValueNotifier(false);
+
+  late Reference reference = FirebaseStorage.instance.ref().child("Livro_Ata");
+  List<String> urls = [];
+
+  void init(int idLivroAta, int idEmpresaUnidade) async {
+    getIt.registerSingleton<LivroAtaAnotacoesModel>(LivroAtaAnotacoesModel());
+
+    idUsuario = await AppHelper().recuperaParametroSalvoLocal("id_usuario")!;
+    idEmpresa = idEmpresaUnidade.toString();
+    _idLivroAta = idLivroAta;
+
+    await getAnotacaoesLivroAta(idLivroAta, currentPage);
+  }
+
+  Future<void> getAnotacaoesLivroAta(int idLivroAta, int page) async {
+    carregando.value = true;
+    notifyListeners();
+    var response = await _anotacoesAtaUsecase(idLivroAta, page);
+
+    response.fold(
+      (l) {
+        errorMessage = l.toString();
+      },
+      (r) {
+        anotacaoes = r;
+      },
+    );
+
+    carregando.value = false;
+    notifyListeners();
+  }
+
+  Future<bool> addAnotacao(context) async {
+    carregando.value = true;
+    notifyListeners();
+
+    AtaAnotacaoModel model = AtaAnotacaoModel(
+      idAnotacaoLivroAta: 0,
+      idLivroAta: _idLivroAta,
+      idUsuario: int.parse(idUsuario),
+      nomeUsuario: "",
+      descricao: '${descricaoAnotacaoController.text}\n-----------------------------------------------\n$relatorio',
+      atualizadoEm: "",
+      criadoEm: "",
+      links: urls.isNotEmpty ? urls : [],
+    );
+
+    var response = await _addAnotacaoAtaUsecase(model);
+
+    response.fold(
+      (l) {
+        errorMessage = l.toString();
+        showSnackBar(context, false, AppLocalizations.of(context)!.products_error_message);
+        Navigator.pop(context);
+        return false;
+      },
+      (r) async {
+        descricaoAnotacaoController.clear();
+
+        await getAnotacaoesLivroAta(_idLivroAta, currentPage);
+        showSnackBar(context, true, AppLocalizations.of(context)!.products_success_message);
+        urls.clear();
+        Navigator.pop(context);
+        return true;
+      },
+    );
+    return true;
+  }
+
+  String montarRelatorioTurno(FinalizarTurnoModel relatorio) {
+    final buffer = StringBuffer();
+
+    final info = relatorio.data.informacoesDetalhadas;
+    buffer.writeln("📊 RELATÓRIO DE TURNO - ${info.empresaUnidade.nome}");
+    buffer.writeln("Período: ${info.periodo.inicio} → ${info.periodo.fim}");
+    buffer.writeln("Total de Leituras: ${info.totalLeituras}\n");
+
+    int totalPlcodes = 0;
+    int totalParametros = 0;
+
+    final operadores = info.operadores;
+    for (var i = 0; i < operadores.length; i++) {
+      final op = operadores[i];
+      buffer.writeln("👥 OPERADOR ${i + 1}: ${op.nome}");
+
+      for (var pl in op.plcodes) {
+        totalPlcodes++;
+        buffer.writeln("🔍 PLCode: ${pl.nome} (id: ${pl.idPlcode})");
+
+        for (var j = 0; j < pl.parametros.length; j++) {
+          final p = pl.parametros[j];
+          totalParametros++;
+          buffer.writeln("${j + 1}. ${p.nome}");
+          buffer.writeln("  Valor Médio: ${p.valorMedio} ${p.unidade}");
+          buffer.writeln("  Mínimo: ${p.leituraMinima} ${p.unidade}");
+          buffer.writeln("  Máximo: ${p.leituraMaxima} ${p.unidade}");
+          buffer.writeln("  Quantidade de Leituras: ${p.quantidadeLeituras}");
+          buffer.writeln("  Quantidade fora do padrão: ${p.quantidadeForaPadrao}");
+
+          if (p.leiturasForaPadrao.isNotEmpty) {
+            buffer.writeln("  ⚠ Leituras fora do padrão (${p.leiturasForaPadrao.length}):");
+            for (var fp in p.leiturasForaPadrao) {
+              buffer.writeln("    • $fp");
+            }
+          }
+
+          for (var nucleo in p.nucleos) {
+            buffer.writeln("  Núcleo: ${nucleo.nome} (id: ${nucleo.idNucleo})");
+            for (var leitura in nucleo.leituras) {
+              buffer.writeln("    • ${leitura.valorLido} ${p.unidade} — ${leitura.dataLeitura} — ${leitura.nomeUsuario}");
+            }
+          }
+        }
+      }
+
+      buffer.writeln("");
+    }
+
+    buffer.writeln("📝 RESUMO EXECUTIVO");
+    buffer.writeln(" - Total de Operadores: ${operadores.length}");
+    buffer.writeln(" - Total de PLCodes: $totalPlcodes");
+    buffer.writeln(" - Total de Parâmetros: $totalParametros");
+    buffer.writeln(" - Total de Leituras: ${info.totalLeituras}");
+    buffer.writeln(" - Período do Turno: ${info.periodo.inicio} → ${info.periodo.fim}");
+
+    return buffer.toString();
+  }
+
+  Future<void> encerrarTurno(context) async {
+    carregando.value = true;
+    enableButton.value = false;
+    notifyListeners();
+    final result = await _finalizarTurnoUsecase(idUsuario, idEmpresa);
+
+    result.fold(
+      (l) {
+        enableButton.value = true;
+        notifyListeners();
+        errorMessage = l.toString();
+        showSnackBar(context, true, AppLocalizations.of(context)!.products_error_message);
+        Navigator.pop(context);
+        return false;
+      },
+      (r) async {
+        relatorio = montarRelatorioTurno(r);
+      },
+    );
+
+    await addAnotacao(context);
+  }
+
+  Future<void> carregarMaisAntigas() async {
+    currentPage++;
+
+    await getAnotacaoesLivroAta(_idLivroAta, currentPage);
+  }
+
+  void validarForm() {
+    if (formKey.currentState?.validate() == true) {
+      enableButton.value = true;
+    } else {
+      enableButton.value = false;
+    }
+  }
+
+  clearFields() {
+    nomeController.clear();
+    deData.value = "";
+    ateData.value = "";
+    notifyListeners();
+  }
+
+  getFiltroPesquisa(context) async {
+    if (ateData.value.isNotEmpty && deData.value.isNotEmpty) {
+      if (int.parse(ateData.value.toString().replaceAll("/", "")) < int.parse(deData.value.toString().replaceAll("/", ""))) {
+        showSnackBar(context, false, "Período Inválido", embaixo: false);
+      } else {
+        await filtrar(context);
+      }
+    } else {
+      await filtrar(context);
+    }
+  }
+
+  Future<void> filtrar(context) async {
+    FiltroModel filtro = FiltroModel(
+      deData: deDataOriginal.isEmpty ? null : deDataOriginal,
+      ateData: ateDataOriginal.isEmpty ? null : ateDataOriginal,
+      nome: nomeController.text,
+    );
+
+    carregando.value = true;
+    notifyListeners();
+    var response = await _anotacoesAtaUsecase(_idLivroAta, 1, filtro: filtro);
+
+    response.fold(
+      (l) {
+        showTopSnackBar(
+          padding: EdgeInsets.zero,
+          animationDuration: const Duration(seconds: 3),
+          snackBarPosition: SnackBarPosition.top,
+          Overlay.of(context),
+          CustomSnackBar.error(
+            messagePadding: EdgeInsets.zero,
+            message: l.toString(),
+            backgroundColor: Cores.vermelho,
+            icon: const Padding(
+              padding: EdgeInsets.all(32),
+              child: Icon(
+                Icons.warning,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        );
+
+        carregando.value = false;
+        notifyListeners();
+      },
+      (r) {
+        anotacaoes = r;
+        carregando.value = false;
+
+        notifyListeners();
+      },
+    );
+  }
+
+  setDeData(DateTime? date) {
+    if (date == null) {
+      deData.value = "";
+    } else {
+      deData.value = DateFormat('dd/MM/yyyy', 'pt_BR').format(date).toString();
+      deDataOriginal = date.toString();
+    }
+    notifyListeners();
+  }
+
+  setAteData(DateTime? date) {
+    if (date == null) {
+      ateData.value = "";
+    } else {
+      ateData.value = DateFormat('dd/MM/yyyy', 'pt_BR').format(date).toString();
+      ateDataOriginal = date.toString();
+    }
+    notifyListeners();
+  }
+
+  Future<void> takePhoto(bool isCamera) async {
+    loading.value = true;
+    notifyListeners();
+    final pickedFile = await picker.pickImage(source: isCamera ? ImageSource.camera : ImageSource.gallery);
+    if (pickedFile != null) {
+      fotoAnotacao.value.add(pickedFile);
+    }
+    loading.value = false;
+    notifyListeners();
+  }
+
+  void removePhoto(int index) {
+    loading.value = true;
+    notifyListeners();
+    fotoAnotacao.value.removeAt(index);
+    loading.value = false;
+    notifyListeners();
+  }
+
+  Future<List<String>> uploadFile(List<File> images) async {
+    List<String> downloadUrls = [];
+
+    for (var image in images) {
+      var result = await _photoUploadUsecase(image, 'Livro_Ata', 'anotacao_${_idLivroAta}_$idUsuario');
+
+      result.fold(
+        (l) {
+          log('Ocorreu um erro $l');
+        },
+        (r) {
+          log('sucesso em recuperar a imagem: $r');
+          downloadUrls.add(r);
+        },
+      );
+    }
+    log('Imagens no GCS ${downloadUrls.length}');
+
+    return downloadUrls;
+  }
+
+  Future<void> uploadImage(context) async {
+    uploading.value = true;
+    enableButton.value = false;
+    notifyListeners();
+
+    final List<File> fotos = fotoAnotacao.value.map((XFile file) => File(file.path)).toList();
+
+    urls = await uploadFile(fotos);
+
+    if (urls.isNotEmpty) {
+      encerrarTurno(context);
+    }
+
+    uploading.value = false;
+    notifyListeners();
+  }
+}

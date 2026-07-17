@@ -1,0 +1,95 @@
+extension SafeJsonParser on Map<String, dynamic> {
+  // Pega um int com segurança (aceita String ou int)
+  int? getInt(String key) {
+    final value = this[key];
+    if (value == null) return null;
+    if (value is int) return value;
+    return int.tryParse(value.toString());
+  }
+
+  // Retorna uma lista de Map<String, dynamic> já filtrada e convertida
+  List<Map<String, dynamic>> getMapList(String key) {
+    final list = this[key] as List<dynamic>?;
+    return list?.whereType<Map<String, dynamic>>().toList() ?? [];
+  }
+}
+
+// Em plcode_model.dart
+class PLCodeModel extends PLCodeEntity {
+  // ... construtor padrão e fromListJson ...
+
+  factory PLCodeModel.fromJsonWithParents(
+    Map<String, dynamic> json, {
+    required int idNucleo,
+    required String nomeNucleo,
+    required String nomeEmpresa,
+  }) {
+    // Cria o objeto base a partir do JSON
+    final base = PLCodeModel.fromListJson(json);
+    // Retorna uma nova instância com os campos dos pais sobrescritos
+    return PLCodeModel(
+      idPlcode: base.idPlcode,
+      nome: base.nome,
+      // ... todos os outros campos que o modelo possui ...
+      idNucleo: idNucleo,
+      nomeNucleo: nomeNucleo,
+      nomeEmpresa: nomeEmpresa,
+    );
+  }
+}
+
+
+factory DadosEmpresaModel.fromJson(Map<String, dynamic> json) {
+  // 1. Lista de empresas (já filtradas por id > 0)
+  final empresas = json
+      .getMapList('data')
+      .map((e) => EmpresaUnidadeModel.fromJson(e))
+      .where((e) => e.projectId > 0)
+      .toList();
+
+  // 2. Lista de núcleos (expandindo os núcleos de cada empresa)
+  final nucleos = json
+      .getMapList('data')
+      .expand((empresaJson) => empresaJson.getMapList('nucleos'))
+      .map((nucleoJson) => NucleoModel.fromJson(nucleoJson))
+      .where((n) => n.nucleoId > 0)
+      .toList();
+
+  // 3. Lista de PLcodes (com dados dos pais)
+  final plcodes = json
+      .getMapList('data')
+      .expand((empresaJson) => empresaJson.getMapList('nucleos').map((nucleoJson) {
+            // Para cada núcleo, precisamos dos dados da empresa e do núcleo
+            final empresa = EmpresaUnidadeModel.fromJson(empresaJson);
+            final nucleo = NucleoModel.fromJson(nucleoJson);
+            // Para cada plcode dentro deste núcleo, criamos o modelo com os pais
+            return nucleoJson.getMapList('plcodes').map((plcodeJson) {
+              return PLCodeModel.fromJsonWithParents(
+                plcodeJson,
+                idNucleo: nucleo.nucleoId,
+                nomeNucleo: nucleo.nucleoName,
+                nomeEmpresa: empresa.projectName,
+              );
+            });
+          }))
+      .expand((list) => list) // achata a lista de listas
+      .where((p) => p.idPlcode > 0)
+      .toList();
+
+  // 4. Lista de parâmetros (expandindo os plcodes)
+  final parametros = json
+      .getMapList('data')
+      .expand((empresaJson) => empresaJson.getMapList('nucleos'))
+      .expand((nucleoJson) => nucleoJson.getMapList('plcodes'))
+      .expand((plcodeJson) => plcodeJson.getMapList('parametros'))
+      .map((paramJson) => ParametroPlcodeModel.fromJson(paramJson))
+      .where((p) => p.idParametro > 0)
+      .toList();
+
+  return DadosEmpresaModel(
+    empresasUnidades: empresas,
+    nucleos: nucleos,
+    plcodes: plcodes,
+    parametros: parametros,
+  );
+}

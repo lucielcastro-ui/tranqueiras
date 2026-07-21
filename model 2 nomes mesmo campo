@@ -1,0 +1,25 @@
+import 'package:step_flutter/features/suporte/domain/entities/tipo_suporte_entity.dart';
+
+class TipoSuporteModel extends TipoSuporteEntity {
+  const TipoSuporteModel({
+    required super.idTipoSuporte,
+    required super.nomeTipoSuporte,
+  });
+
+  factory TipoSuporteModel.fromJson(Map<String, dynamic> json) {
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    String parseString(dynamic value) => value?.toString() ?? '';
+
+    final nome = json['nome'] ?? json['nome_tipo_suporte'];
+
+    return TipoSuporteModel(
+      idTipoSuporte: parseInt(json['id_tipo_suporte']),
+      nomeTipoSuporte: parseString(nome),
+    );
+  }
+}

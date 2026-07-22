@@ -1,0 +1,5 @@
+    // double parseDouble(dynamic value) {
+    //   final texto = value?.toString() ?? '0';
+    //   if (texto.contains('.')) return double.parse(texto);
+    //   return int.parse(texto).toDouble();
+    // }

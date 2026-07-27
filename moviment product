@@ -1,0 +1,186 @@
+import 'package:equatable/equatable.dart';
+
+/// Representa tanto a movimentação vinda da API (GET) quanto os parâmetros
+/// para criar uma nova movimentação (POST).
+class ProductMovementEntity extends Equatable {
+  // 🔹 Campos comuns (GET + POST)
+  final int idProdutoObra;
+  final int idUsuario;
+  final String quantidade;
+  final int status;
+  final int? tipo;
+  final String lote;
+  final String validade;
+  final String documento;
+  final int? idNucleoTransferencia;
+
+  // 🔹 Campos exclusivos da resposta (GET)
+  final int? idMovimentacaoProduto;
+  final String? createdAt;
+  final String? updatedAt;
+  final String? nomeUsuario;
+  final String? nomeNucleoTransferencia;
+
+  // 🔹 Campos exclusivos da requisição (POST)
+  final int? idNucleo;          // Obrigatório no POST
+  final int? idConversao;       // Obrigatório no POST
+  final int? idMovimentacaoProdutoReferencia; // Opcional no POST
+
+  const ProductMovementEntity({
+    required this.idProdutoObra,
+    required this.idUsuario,
+    required this.quantidade,
+    required this.status,
+    required this.lote,
+    required this.validade,
+    this.tipo,
+    this.documento = '',
+    this.idNucleoTransferencia,
+    this.idMovimentacaoProduto,
+    this.createdAt,
+    this.updatedAt,
+    this.nomeUsuario,
+    this.nomeNucleoTransferencia,
+    this.idNucleo,
+    this.idConversao,
+    this.idMovimentacaoProdutoReferencia,
+  });
+
+  // ════════════════════════════════════════════════════════
+  // 🔒 REGRAS DE NEGÓCIO (exatamente como estavam)
+  // ════════════════════════════════════════════════════════
+  bool get isEntrada => status == 0;
+  bool get isSaida => status == 1;
+
+  bool get isEntradaPorTransferencia => isEntrada && tipo == 1;
+  bool get isEntradaSimples => isEntrada && (tipo == 0 || tipo == null);
+
+  bool get isSaidaPorTransferencia => isSaida && tipo == 1;
+  bool get isSaidaSimples => isSaida && (tipo == 0 || tipo == null);
+
+  // ════════════════════════════════════════════════════════
+  // 📨 Gera o corpo da requisição POST (antigo Params)
+  // ════════════════════════════════════════════════════════
+  Map<String, dynamic> toJsonBody() {
+    if (idNucleo == null || idConversao == null) {
+      throw ArgumentError('idNucleo e idConversao são obrigatórios para criar movimentação.');
+    }
+
+    final doc = documento.trim().isEmpty ? null : documento.trim();
+    final ref = idMovimentacaoProdutoReferencia;
+
+    return {
+      'id_produto_obra': idProdutoObra,
+      'id_nucleo': idNucleo,
+      'id_usuario': idUsuario,
+      'quantidade': quantidade,
+      'status': status,
+      'lote': lote,
+      'validade': validade,
+      'tipo': tipo ?? 0, // fallback seguro
+      'id_conversao': idConversao,
+      'documento': doc,
+      'id_nucleo_transferencia': idNucleoTransferencia,
+      if (ref != null && ref > 0) 'id_movimentacao_produto': ref,
+    };
+  }
+
+  @override
+  List<Object?> get props => [
+        idProdutoObra,
+        idUsuario,
+        quantidade,
+        status,
+        tipo,
+        lote,
+        validade,
+        documento,
+        idNucleoTransferencia,
+        idMovimentacaoProduto,
+        createdAt,
+        updatedAt,
+        nomeUsuario,
+        nomeNucleoTransferencia,
+        idNucleo,
+        idConversao,
+        idMovimentacaoProdutoReferencia,
+      ];
+}
+
+import 'product_movement_entity.dart';
+
+class ProductMovementModel extends ProductMovementEntity {
+  const ProductMovementModel({
+    required super.idProdutoObra,
+    required super.idUsuario,
+    required super.quantidade,
+    required super.status,
+    required super.lote,
+    required super.validade,
+    super.tipo,
+    super.documento,
+    super.idNucleoTransferencia,
+    super.idMovimentacaoProduto,
+    super.createdAt,
+    super.updatedAt,
+    super.nomeUsuario,
+    super.nomeNucleoTransferencia,
+    super.idNucleo,
+    super.idConversao,
+    super.idMovimentacaoProdutoReferencia,
+  });
+
+  factory ProductMovementModel.fromJson(Map<String, dynamic> json) {
+    // Helpers de parsing (extraídos dos seus models anteriores)
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    String parseString(dynamic value) => value?.toString() ?? '';
+    
+    String? parseNullableString(dynamic value) {
+      if (value == null) return null;
+      final s = value.toString();
+      return s.isEmpty ? null : s;
+    }
+
+    int? parseNullableInt(dynamic value) {
+      if (value == null) return null;
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value);
+      return null;
+    }
+
+    int? parseTipo(Object? value) {
+      if (value == null) return null;
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value);
+      return null;
+    }
+
+    return ProductMovementModel(
+      // 🔸 Campos da resposta (GET)
+      idMovimentacaoProduto: parseInt(json['id_movimentacao_produto']),
+      idProdutoObra: parseInt(json['id_produto_obra']),
+      idUsuario: parseInt(json['id_usuario']),
+      quantidade: parseString(json['quantidade']),
+      documento: parseString(json['documento']),
+      status: parseInt(json['status']),
+      createdAt: parseString(json['created_at']),
+      updatedAt: parseString(json['updated_at']),
+      lote: parseString(json['lote']),
+      validade: parseString(json['validade']),
+      tipo: parseTipo(json['tipo']),
+      idNucleoTransferencia: parseNullableInt(json['id_nucleo_transferencia']),
+      nomeNucleoTransferencia: parseNullableString(json['nome_nucleo_transferencia']),
+      nomeUsuario: parseString(json['nome_usuario']),
+      
+      // 🔸 Campos da requisição (POST) – não vêm do JSON, ficam nulos
+      idNucleo: null,
+      idConversao: null,
+      idMovimentacaoProdutoReferencia: null,
+    );
+  }
+}

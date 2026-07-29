@@ -1,0 +1,9 @@
+-- ver usuários root existentes
+SELECT user, host, plugin FROM mysql.user WHERE user='root';
+
+-- garantir root remoto com a senha do .env
+CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH caching_sha2_password BY 'Flamengo10%';
+ALTER USER 'root'@'%' IDENTIFIED WITH caching_sha2_password BY 'Flamengo10%';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'Flamengo10%';
+GRANT ALL PRIVILEGES ON db_step.* TO 'root'@'%';
+FLUSH PRIVILEGES;

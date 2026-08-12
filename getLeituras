@@ -1,0 +1,29 @@
+@override
+  Future<List<GetLeituraModel>> getLeituras(
+    String idUsuario,
+    DateTime dataInicial,
+    DateTime dataFinal,
+    int tipoLeitura,
+  ) async {
+    String formatarData(DateTime d) =>
+        "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+
+    final queryParameters = <String, String>{
+      'inicio': formatarData(dataInicial),
+      'fim': formatarData(dataFinal),
+    };
+    // 2 = todos (sem filtro de tipo no backend).
+    if (tipoLeitura == 0 || tipoLeitura == 1) {
+      queryParameters['automatico'] = tipoLeitura.toString();
+    }
+
+    final uri = Uri.parse('${AppConstants.authUrl}/api/leituras').replace(
+      queryParameters: queryParameters,
+    );
+
+    return parseResponseAsListAuthGuard<GetLeituraModel>(
+      uri,
+      GetLeituraModel.fromMap,
+      successStatusCode: 200,
+    );
+  }

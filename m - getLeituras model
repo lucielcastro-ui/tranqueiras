@@ -1,0 +1,86 @@
+import 'dart:convert';
+import 'package:step_flutter/features/leituras/domain/entities/get_leitura_entity.dart';
+
+class GetLeituraModel extends GetLeituraEntity {
+  const GetLeituraModel({
+    super.idLeitura,
+    super.valorLido,
+    super.latitude,
+    super.longitude,
+    super.status,
+    super.idParametro,
+    super.createdAt,
+    super.updatedAt,
+    super.idUsuario,
+    super.imagemLeitura,
+    super.statusLabel,
+    super.nomeUsuario,
+    super.nomeParametro,
+    super.valorMinimo,
+    super.valorMaximo,
+    super.idPlcode,
+    super.nomePlcode,
+    super.idNucleo,
+    super.nomeNucleo,
+    super.idEmpresaUnidade,
+    super.nomeEmpresaUnidade,
+    super.idEmpresa,
+  });
+
+  factory GetLeituraModel.fromMap(Map<String, dynamic> map) {
+    final usuario = map['usuario'] as Map<String, dynamic>?;
+    final parametro = map['parametro'] as Map<String, dynamic>?;
+    final plcode = parametro?['plcode'] as Map<String, dynamic>?;
+    final nucleo = plcode?['nucleo'] as Map<String, dynamic>?;
+    final empresaUnidade = nucleo?['empresa_unidade'] as Map<String, dynamic>?;
+
+    double? parseDouble(dynamic value) {
+      if (value == null) return null;
+      if (value is num) return value.toDouble();
+      return double.tryParse(value.toString());
+    }
+
+    int? parseInt(dynamic value) {
+      if (value == null) return null;
+      if (value is int) return value;
+      return int.tryParse(value.toString());
+    }
+
+    return GetLeituraModel(
+      idLeitura: parseInt(map['id_leitura']),
+      valorLido: map['valor_lido']?.toString(),
+      latitude: map['latitude']?.toString(),
+      longitude: map['longitude']?.toString(),
+      status: parseInt(map['status']),
+      idParametro: parseInt(map['id_parametro']),
+      createdAt: map['created_at'] != null
+          ? DateTime.tryParse(map['created_at'].toString())
+          : null,
+      updatedAt: map['updated_at'] != null
+          ? DateTime.tryParse(map['updated_at'].toString())
+          : null,
+      idUsuario: parseInt(map['id_usuario'] ?? usuario?['id_usuario']),
+      imagemLeitura: map['imagem_leitura']?.toString(),
+      statusLabel: map['status_label']?.toString(),
+      nomeUsuario:
+          map['nome_usuario']?.toString() ?? usuario?['nome']?.toString(),
+      nomeParametro:
+          map['nome_parametro']?.toString() ?? parametro?['nome']?.toString(),
+      valorMinimo: parseDouble(map['valor_minimo'] ?? parametro?['minimo']),
+      valorMaximo: parseDouble(map['valor_maximo'] ?? parametro?['maximo']),
+      idPlcode: parseInt(
+          map['id_plcode'] ?? parametro?['id_plcode'] ?? plcode?['id_plcode']),
+      nomePlcode: map['nome_plcode']?.toString() ?? plcode?['nome']?.toString(),
+      idNucleo: parseInt(map['id_nucleo'] ?? plcode?['id_nucleo']),
+      nomeNucleo: map['nome_nucleo']?.toString() ?? nucleo?['nome']?.toString(),
+      idEmpresaUnidade:
+          parseInt(map['id_empresa_unidade'] ?? nucleo?['id_empresa_unidade']),
+      nomeEmpresaUnidade: map['nome_empresa_unidade']?.toString() ??
+          empresaUnidade?['nome']?.toString(),
+      idEmpresa: parseInt(map['id_empresa'] ?? empresaUnidade?['id_empresa']),
+    );
+  }
+
+  factory GetLeituraModel.fromJson(String source) =>
+      GetLeituraModel.fromMap(json.decode(source) as Map<String, dynamic>);
+}

@@ -1,0 +1,25 @@
+import 'package:step_flutter/core/util/extensions/parse_int.dart';
+import 'package:step_flutter/features/empresa_unidade/domain/entities/membro_nucleo_entity.dart';
+
+class MembroNucleoModel extends MembroNucleoEntity {
+  const MembroNucleoModel({
+    required super.idParticipante,
+    required super.idUsuario,
+    required super.nomeUsuario,
+    required super.status,
+  });
+
+  factory MembroNucleoModel.fromJson(Map<String, dynamic> json) {
+    final userData = json['usuario'];
+    final userMap = userData is Map<String, dynamic> ? userData : null;
+    final userId = parseInt(json['id_usuario']);
+    final nomeUsuario = userMap?['nome_usuario']?.toString().trim() ?? '';
+
+    return MembroNucleoModel(
+      idParticipante: parseInt(json['id_participante']),
+      idUsuario: userId,
+      nomeUsuario: nomeUsuario.isEmpty ? 'Usuario $userId' : nomeUsuario,
+      status: parseInt(json['status']),
+    );
+  }
+}

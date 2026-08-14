@@ -1,0 +1,251 @@
+import 'package:dartz/dartz.dart';
+import 'package:step_flutter/core/error/exceptions.dart';
+import 'package:step_flutter/core/error/failures.dart';
+import 'package:step_flutter/features/tasks/data/data_sources/local/task_local_data_source.dart';
+import 'package:step_flutter/features/tasks/data/data_sources/remote/task_remote_data_source.dart';
+import 'package:step_flutter/features/tasks/data/model/register_tarefa_model.dart';
+import 'package:step_flutter/features/tasks/data/model/task_model.dart';
+import 'package:step_flutter/features/tasks/domain/entities/register_tarefa_entity.dart';
+import 'package:step_flutter/features/tasks/domain/entities/realized_schedule_entry_entity.dart';
+import 'package:step_flutter/features/tasks/domain/entities/tarefa_tipo_entity.dart';
+import 'package:step_flutter/features/tasks/domain/entities/task_entity.dart';
+import 'package:step_flutter/features/tasks/domain/repositories/task_repository.dart';
+import 'package:step_flutter/core/util/remote_repository_impl_guard.dart';
+
+class TaskRepositoryImpl implements TaskRepository {
+  final TaskRemoteDataSource remoteDataSource;
+  final TaskLocalDataSource localDataSource;
+  final RemoteRepositoryImplGuard remoteGuard;
+
+  TaskRepositoryImpl({
+    required this.remoteDataSource,
+    required this.localDataSource,
+    required this.remoteGuard,
+  });
+
+  Future<List<TaskModel>> _getLocalTasksOrEmpty(int idUser) async {
+    try {
+      return await localDataSource.getTasksByGroup(idUser);
+    } on CacheException {
+      return <TaskModel>[];
+    } on FormatException {
+      return <TaskModel>[];
+    }
+  }
+
+  @override
+  Future<Either<Failure, List<TarefaTipoEntity>>> getTarefaTipos() {
+    return remoteGuard.guard(() => remoteDataSource.getTarefaTipos());
+  }
+
+  @override
+  Future<Either<Failure, bool>> registerTarefa({
+    required RegisterTarefaEntity tarefa,
+    required TaskEntity taskForLocalCache,
+  }) {
+    return remoteGuard.guard(() async {
+      await remoteDataSource.registerTarefa(
+        RegisterTarefaModel.fromEntity(tarefa),
+      );
+      final idUser = tarefa.idUsuario;
+      final model = TaskModel.fromEntity(taskForLocalCache);
+      final currentTasks = await _getLocalTasksOrEmpty(idUser);
+      await localDataSource.saveTasks(idUser, [model, ...currentTasks]);
+      return true;
+    });
+  }
+
+  @override
+  Future<Either<Failure, TaskEntity>> executeTaskRemote(
+    int idUser,
+    TaskEntity task,
+  ) {
+    return remoteGuard.guard(() async {
+      final executedTask = await remoteDataSource.executeTask(
+        TaskModel.fromEntity(task),
+      );
+      final currentTasks = await _getLocalTasksOrEmpty(idUser);
+      final existingIndex =
+          currentTasks.indexWhere((item) => item.taskId == executedTask.taskId);
+      final updatedTasks = List<TaskModel>.from(currentTasks);
+      if (existingIndex < 0) {
+        updatedTasks.insert(0, executedTask);
+      } else {
+        updatedTasks[existingIndex] = executedTask;
+      }
+      await localDataSource.saveTasks(idUser, updatedTasks);
+      return executedTask;
+    });
+  }
+
+  @override
+  Future<Either<Failure, bool>> sendMessageRemote({
+    required int idUser,
+    required TaskEntity task,
+    required String message,
+    required int messageStatus,
+    required String photoUrl,
+  }) {
+    return remoteGuard.guard(
+      () => remoteDataSource.sendMessage(
+        idUser: idUser,
+        task: TaskModel.fromEntity(task),
+        message: message,
+        messageStatus: messageStatus,
+        photoUrl: photoUrl,
+      ),
+    );
+  }
+
+  @override
+  Future<Either<Failure, bool>> registerScheduleExecution({
+    required String subTaskId,
+    required int idUser,
+    required int idTask,
+    required String scheduleTime,
+    required String executedTime,
+    required int idScheduleExecution,
+    required bool createAttendance,
+  }) {
+    return remoteGuard.guard(
+      () => remoteDataSource.registerScheduleExecution(
+        subTaskId: subTaskId,
+        idUser: idUser,
+        idTask: idTask,
+        scheduleTime: scheduleTime,
+        executedTime: executedTime,
+        idScheduleExecution: idScheduleExecution,
+        createAttendance: createAttendance,
+      ),
+    );
+  }
+
+  @override
+  Future<Either<Failure, Map<String, List<RealizedScheduleEntryEntity>>>>
+      getScheduleExecutionsBatch({
+    required List<String> subTaskIds,
+  }) {
+    return remoteGuard.guard(
+      () => remoteDataSource.getScheduleExecutionsBatch(
+        subTaskIds: subTaskIds,
+      ),
+    );
+  }
+}
+import 'package:dartz/dartz.dart';
+import 'package:step_flutter/core/error/failures.dart';
+import 'package:step_flutter/features/tasks/data/data_sources/local/task_local_data_source.dart';
+import 'package:step_flutter/features/tasks/data/data_sources/remote/task_chat_remote_data_source.dart';
+import 'package:step_flutter/features/tasks/domain/entities/task_details_entity.dart';
+import 'package:step_flutter/features/tasks/domain/entities/task_entity.dart';
+import 'package:step_flutter/features/tasks/domain/repositories/task_chat_repository.dart';
+import 'package:step_flutter/core/util/remote_repository_impl_guard.dart';
+
+class TaskChatRepositoryImpl implements TaskChatRepository {
+  final TaskChatRemoteDataSource remoteDataSource;
+  final TaskLocalDataSource localDataSource;
+  final RemoteRepositoryImplGuard remoteGuard;
+
+  TaskChatRepositoryImpl({
+    required this.remoteDataSource,
+    required this.localDataSource,
+    required this.remoteGuard,
+  });
+
+  TaskDetailsEntity _detailsFromCachedTask({
+    required dynamic cachedTask,
+    required int mainTaskId,
+    required String subTaskId,
+  }) {
+    return TaskDetailsEntity(
+      idTarefa: mainTaskId,
+      titulo: cachedTask.title,
+      descricao: cachedTask.description,
+      nomeUsuario: cachedTask.userName,
+      nomeResponsavel: cachedTask.responsibleName,
+      statusSubTarefa: cachedTask.status,
+      idSubTarefa: subTaskId,
+      atendimentos: const [],
+    );
+  }
+
+  int _mainTaskIdFromTask(TaskEntity task) {
+    if (task.parentId > 0) return task.parentId;
+    final normalized = task.taskId.split('.').first;
+    return int.tryParse(normalized) ?? 0;
+  }
+
+  Future<Either<Failure, TaskDetailsEntity>> _offlineFallback(
+    GetTaskChatParams params,
+  ) async {
+    try {
+      final cachedTask = await localDataSource.getTaskById(
+        idUser: params.idUser,
+        mainTaskId: params.mainTaskId,
+        lookupTaskId: params.lookupTaskId,
+        subTaskId: params.subTaskId,
+      );
+      if (cachedTask != null) {
+        return Right(
+          _detailsFromCachedTask(
+            cachedTask: cachedTask,
+            mainTaskId: params.mainTaskId,
+            subTaskId: params.subTaskId,
+          ),
+        );
+      }
+      return Right(
+        TaskDetailsEntity(
+          idTarefa: params.mainTaskId,
+          titulo: '',
+          descricao: '',
+          nomeUsuario: '',
+          nomeResponsavel: '',
+          statusSubTarefa: 0,
+          idSubTarefa: params.subTaskId,
+          atendimentos: const [],
+        ),
+      );
+    } catch (_) {
+      return Left(CacheFailure());
+    }
+  }
+
+  @override
+  Future<Either<Failure, TaskDetailsEntity>> getChat(
+    GetTaskChatParams params,
+  ) async {
+    final remoto = await remoteGuard.guard(
+      () => remoteDataSource.obterChat(
+        params.subTaskId,
+        forcarAtualizacao: params.forceRefresh,
+      ),
+    );
+
+    return remoto.fold(
+      (falha) async {
+        if (falha is NetworkFailure) {
+          return _offlineFallback(params);
+        }
+        return Left(falha);
+      },
+      (detalhes) => Right(detalhes),
+    );
+  }
+
+  @override
+  Future<Either<Failure, bool>> sendMessage(
+    SendTaskChatMessageParams params,
+  ) async {
+    final mainTaskId = _mainTaskIdFromTask(params.task);
+    return remoteGuard.guard(
+      () => remoteDataSource.enviarMensagem(
+        idUsuario: params.idUser,
+        idTarefaMae: mainTaskId,
+        idSubTarefa: params.task.taskId,
+        mensagem: params.message,
+        urlFoto: params.photoUrl,
+      ),
+    );
+  }
+}

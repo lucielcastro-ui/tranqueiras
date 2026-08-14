@@ -1,0 +1,103 @@
+import 'dart:convert';
+
+import 'package:step_flutter/core/error/exceptions.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:step_flutter/features/tasks/data/model/task_model.dart';
+
+abstract class TaskLocalDataSource {
+  Future<List<TaskModel>> getTasksByGroup(int idUser);
+  Future<TaskModel?> getTaskById({
+    required int idUser,
+    required int mainTaskId,
+    required String lookupTaskId,
+    required String subTaskId,
+  });
+  Future<void> saveTasks(int idUser, List<TaskModel> params);
+  Future<void> clearTasks(int idUser);
+}
+
+String cachedTasksKey(int idUser) => 'CACHED_TASKS_$idUser';
+
+class TaskLocalDataSourceImpl implements TaskLocalDataSource {
+  final SharedPreferences sharedPreferences;
+  TaskLocalDataSourceImpl({required this.sharedPreferences});
+  @override
+  Future<List<TaskModel>> getTasksByGroup(int idUser) async {
+    final jsonString = sharedPreferences.getString(cachedTasksKey(idUser));
+    if (jsonString != null) {
+      try {
+        final body = jsonString.trim();
+        if (body.isEmpty) return const <TaskModel>[];
+
+        final decoded = jsonDecode(body);
+
+        List<dynamic> raw;
+        if (decoded is List) {
+          raw = decoded;
+        } else if (decoded is Map<String, dynamic>) {
+          final data = decoded['data'];
+          if (data is List) {
+            raw = data;
+          } else {
+            throw const FormatException('Invalid task list payload');
+          }
+        } else {
+          throw const FormatException('Invalid task list payload');
+        }
+
+        final tasks = <TaskModel>[];
+        for (final item in raw) {
+          if (item is Map<String, dynamic>) {
+            try {
+              tasks.add(TaskModel.fromJson(item));
+            } catch (_) {
+              // Ignora itens inválidos
+            }
+          }
+        }
+
+        return tasks;
+      } on FormatException {
+        await clearTasks(idUser);
+        throw CacheException();
+      }
+    }
+    throw CacheException();
+  }
+
+  @override
+  Future<TaskModel?> getTaskById({
+    required int idUser,
+    required int mainTaskId,
+    required String lookupTaskId,
+    required String subTaskId,
+  }) async {
+    final localTasks = await getTasksByGroup(idUser);
+    for (final task in localTasks) {
+      if (task.taskId == lookupTaskId || task.taskId == subTaskId) {
+        return task;
+      }
+    }
+    for (final task in localTasks) {
+      final taskMainId = int.tryParse(task.taskId.split('.').first) ?? 0;
+      if (taskMainId == mainTaskId || task.parentId == mainTaskId) {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<void> saveTasks(int idUser, List<TaskModel> params) async {
+    await sharedPreferences.setString(
+      cachedTasksKey(idUser),
+      json.encode(params.map((task) => task.toJson()).toList()),
+    );
+  }
+
+  @override
+  Future<void> clearTasks(int idUser) async {
+    await sharedPreferences.remove(cachedTasksKey(idUser));
+    return;
+  }
+}

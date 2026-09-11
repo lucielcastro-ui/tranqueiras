@@ -1,0 +1,33 @@
+import 'package:equatable/equatable.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:step_flutter/core/error/failures.dart';
+import 'package:step_flutter/features/nucleo/domain/entities/nucleo_entity.dart';
+import 'package:step_flutter/features/nucleo/domain/usecases/get_nucleos_usecase.dart';
+
+part 'nucleo_event.dart';
+part 'nucleo_state.dart';
+
+class NucleoBloc extends Bloc<NucleoEvent, NucleoState> {
+  final GetNucleosUsecase _getNucleosUsecase;
+
+  NucleoBloc(this._getNucleosUsecase) : super(const NucleoInitial()) {
+    on<LoadNucleos>(_onLoadNucleos);
+  }
+
+  Future<void> _onLoadNucleos(
+    LoadNucleos event,
+    Emitter<NucleoState> emit,
+  ) async {
+    if (state is! NucleoLoading) emit(const NucleoLoading());
+    try {
+      final result = await _getNucleosUsecase(event.projectId);
+      if (isClosed) return;
+      result.fold(
+        (failure) => emit(NucleoError(failure)),
+        (nucleos) => emit(NucleoLoaded(nucleos)),
+      );
+    } catch (e) {
+      if (!isClosed) emit(NucleoError(ServerFailure(e.toString())));
+    }
+  }
+}

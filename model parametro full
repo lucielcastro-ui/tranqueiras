@@ -1,0 +1,122 @@
+import 'package:step_flutter/core/util/extensions/parse_double.dart';
+import 'package:step_flutter/core/util/extensions/parse_int.dart';
+import 'package:step_flutter/core/util/extensions/parse_string.dart';
+import 'package:step_flutter/features/parametro_plcode/domain/entities/parametro_plcode_entity.dart';
+
+class ParametroPlcodeModel extends ParametroPlcodeEntity {
+  const ParametroPlcodeModel({
+    required super.idParametro,
+    required super.nome,
+    required super.maximo,
+    required super.minimo,
+    required super.status,
+    required super.idPlcode,
+    required super.situacao,
+    required super.unidadeMedida,
+    super.parametroLido,
+    super.url,
+  });
+
+  factory ParametroPlcodeModel.fromJson(Map<String, dynamic> json) {
+    return ParametroPlcodeModel.fromMap(json);
+  }
+
+  factory ParametroPlcodeModel.fromMap(Map<String, dynamic> map) {
+    final unidadeData = map['unidade'];
+    final unidadeMap =
+        unidadeData is Map ? Map<String, dynamic>.from(unidadeData) : null;
+
+    return ParametroPlcodeModel(
+      idParametro: parseInt(map['id_parametro']),
+      nome: parseString(map['nome']),
+      maximo: parseDouble(map['maximo']),
+      minimo: parseDouble(map['minimo']),
+      status: parseInt(map['status']),
+      idPlcode: parseInt(map['id_plcode']),
+      situacao: parseInt(map['situacao']),
+      unidadeMedida: parseString(
+        unidadeMap?['nome'] ?? '-',
+      ),
+      parametroLido: parseString(map['parametro_lido']),
+      url: parseString(map['url']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id_parametro': idParametro,
+        'nome': nome,
+        'maximo': maximo,
+        'minimo': minimo,
+        'status': status,
+        'id_plcode': idPlcode,
+        'situacao': situacao,
+        'unidade_medida': unidadeMedida,
+      };
+
+  Map<String, dynamic> toLocalMap({required int updatedAt}) => {
+        'id_parametro': idParametro,
+        'id_plcode': idPlcode,
+        'nome': nome,
+        'maximo': maximo,
+        'minimo': minimo,
+        'status': status,
+        'situacao': situacao,
+        'unidade_medida': unidadeMedida,
+        'updated_at': updatedAt,
+      };
+
+  factory ParametroPlcodeModel.fromLocalMap(Map<String, dynamic> map) {
+    return ParametroPlcodeModel(
+      idParametro: map['id_parametro'] as int,
+      idPlcode: map['id_plcode'] as int,
+      nome: map['nome'] as String,
+      maximo: (map['maximo'] as num).toDouble(),
+      minimo: (map['minimo'] as num).toDouble(),
+      status: map['status'] as int,
+      situacao: map['situacao'] as int,
+      unidadeMedida: map['unidade_medida'] as String,
+    );
+  }
+
+  // @override
+  // ParametroPlcodeModel copyWith({
+  //   int? idParametro,
+  //   String? nome,
+  //   double? maximo,
+  //   double? minimo,
+  //   int? status,
+  //   int? idPlcode,
+  //   int? situacao,
+  //   String? unidadeMedida,
+  //   String? parametroLido,
+  //   String? url,
+  // }) {
+  //   return ParametroPlcodeModel(
+  //     idParametro: idParametro ?? this.idParametro,
+  //     nome: nome ?? this.nome,
+  //     maximo: maximo ?? this.maximo,
+  //     minimo: minimo ?? this.minimo,
+  //     status: status ?? this.status,
+  //     idPlcode: idPlcode ?? this.idPlcode,
+  //     situacao: situacao ?? this.situacao,
+  //     unidadeMedida: unidadeMedida ?? this.unidadeMedida,
+  //     parametroLido: parametroLido ?? this.parametroLido,
+  //     url: url ?? this.url,
+  //   );
+  // }
+
+  // factory ParametroPlcodeModel.fromEntity(ParametroPlcodeEntity entity) {
+  //   return ParametroPlcodeModel(
+  //     idParametro: entity.idParametro,
+  //     nome: entity.nome,
+  //     maximo: entity.maximo,
+  //     minimo: entity.minimo,
+  //     status: entity.status,
+  //     idPlcode: entity.idPlcode,
+  //     situacao: entity.situacao,
+  //     unidadeMedida: entity.unidadeMedida,
+  //     parametroLido: entity.parametroLido,
+  //     url: entity.url,
+  //   );
+  // }
+}

@@ -1,0 +1,115 @@
+import 'package:step_flutter/core/util/extensions/parse_int.dart';
+import 'package:step_flutter/core/util/extensions/parse_string.dart';
+import 'package:step_flutter/features/parametro_plcode/data/model/parametro_plcode_model.dart';
+import 'package:step_flutter/features/parametro_plcode/domain/entities/parametro_plcode_entity.dart';
+import 'package:step_flutter/features/plcode/domain/entities/plcode_entity.dart';
+
+class PLCodeModel extends PLCodeEntity {
+  const PLCodeModel({
+    required super.idPlcode,
+    super.idNucleo = 0,
+    required super.nomePlcode,
+    required super.nomeNucleo,
+    required super.nomeUnidade,
+    required super.nomeEmpresa,
+    required super.statusPlcode,
+    super.parametros,
+  });
+
+  factory PLCodeModel.fromListJson(Map<String, dynamic> json) {
+    
+    return PLCodeModel(
+      idPlcode: parseInt(json['id_plcode']),
+      idNucleo: parseInt(json['id_nucleo']),
+      nomePlcode: parseString(json['nome_plcode'] ?? json['nome']),
+      nomeNucleo: '',
+      nomeUnidade: '',
+      nomeEmpresa: '',
+      statusPlcode: parseInt(json['status']),
+    );
+  }
+
+  Map<String, dynamic> toLocalInfoMap({required int updatedAt}) => {
+        'id_plcode': idPlcode,
+        'nome_plcode': nomePlcode,
+        'nome_nucleo': nomeNucleo,
+        'nome_unidade': nomeUnidade,
+        'nome_empresa': nomeEmpresa,
+        'status_plcode': statusPlcode,
+        'updated_at': updatedAt,
+      };
+
+  Map<String, dynamic> toLocalListMap({
+    required int nucleoId,
+    required int updatedAt,
+  }) =>
+      {
+        'id_plcode': idPlcode,
+        'id_nucleo': nucleoId,
+        'nome': nomePlcode,
+        'updated_at': updatedAt,
+      };
+
+  factory PLCodeModel.fromLocalInfoMap(Map<String, dynamic> map) {
+    return PLCodeModel(
+      idPlcode: map['id_plcode'] as int,
+      nomePlcode: map['nome_plcode'] as String,
+      nomeNucleo: map['nome_nucleo'] as String,
+      nomeUnidade: map['nome_unidade'] as String,
+      nomeEmpresa: map['nome_empresa'] as String,
+      statusPlcode: map['status_plcode'] as int,
+    );
+  }
+
+  factory PLCodeModel.fromLocalListMap(Map<String, dynamic> map) {
+    return PLCodeModel(
+      idPlcode: map['id_plcode'] as int,
+      idNucleo: map['id_nucleo'] as int? ?? 0,
+      nomePlcode: map['nome'] as String,
+      nomeNucleo: '',
+      nomeUnidade: '',
+      nomeEmpresa: '',
+      statusPlcode: 0,
+    );
+  }
+
+  @override
+  PLCodeModel copyWith({
+    int? idPlcode,
+    int? idNucleo,
+    String? nomePlcode,
+    String? nomeNucleo,
+    String? nomeUnidade,
+    String? nomeEmpresa,
+    int? statusPlcode,
+    List<ParametroPlcodeEntity>? parametros,
+  }) {
+    return PLCodeModel(
+      idPlcode: idPlcode ?? this.idPlcode,
+      idNucleo: idNucleo ?? this.idNucleo,
+      nomePlcode: nomePlcode ?? this.nomePlcode,
+      nomeNucleo: nomeNucleo ?? this.nomeNucleo,
+      nomeUnidade: nomeUnidade ?? this.nomeUnidade,
+      nomeEmpresa: nomeEmpresa ?? this.nomeEmpresa,
+      statusPlcode: statusPlcode ?? this.statusPlcode,
+      parametros: parametros ?? this.parametros,
+    );
+  }
+
+  PLCodeModel withParametros(List<ParametroPlcodeModel> parametros) {
+    return copyWith(parametros: parametros);
+  }
+
+  factory PLCodeModel.fromEntity(PLCodeEntity entity) {
+    return PLCodeModel(
+      idPlcode: entity.idPlcode,
+      idNucleo: entity.idNucleo,
+      nomePlcode: entity.nomePlcode,
+      nomeNucleo: entity.nomeNucleo,
+      nomeUnidade: entity.nomeUnidade,
+      nomeEmpresa: entity.nomeEmpresa,
+      statusPlcode: entity.statusPlcode,
+      parametros: entity.parametros,
+    );
+  }
+}

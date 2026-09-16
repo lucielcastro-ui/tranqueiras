@@ -1,0 +1,70 @@
+import 'package:equatable/equatable.dart';
+import 'package:step_flutter/features/parametro_plcode/domain/entities/parametro_plcode_entity.dart';
+
+///  listagem `GET /plcode/nucleo/{id}` e detalhe montado no cache
+/// (empresa/unidade → núcleo → plcode).
+class PLCodeEntity extends Equatable {
+  final int idPlcode;
+  final int idNucleo;
+  final String nomePlcode;
+  final String nomeNucleo;
+  final String nomeUnidade;
+  final String nomeEmpresa;
+  final int statusPlcode;
+  final List<ParametroPlcodeEntity> parametros;
+
+  const PLCodeEntity({
+    required this.idPlcode,
+    this.idNucleo = 0,
+    required this.nomePlcode,
+    required this.nomeNucleo,
+    required this.nomeUnidade,
+    required this.nomeEmpresa,
+    required this.statusPlcode,
+    this.parametros = const [],
+  });
+
+  // /// Alias para telas que usavam [PLCodeUnidadeEntity].
+  // int get plcodeId => idPlcode;
+
+  // /// Alias para telas que usavam [PLCodeUnidadeEntity].
+  // String get plcodeName => nomePlcode;
+
+  bool get isLiberado => statusPlcode == 0;
+  bool get temSuporteAberto => statusPlcode == 2;
+  bool get isInativo => statusPlcode == 3;
+
+  PLCodeEntity copyWith({
+    int? idPlcode,
+    int? idNucleo,
+    String? nomePlcode,
+    String? nomeNucleo,
+    String? nomeUnidade,
+    String? nomeEmpresa,
+    int? statusPlcode,
+    List<ParametroPlcodeEntity>? parametros,
+  }) {
+    return PLCodeEntity(
+      idPlcode: idPlcode ?? this.idPlcode,
+      idNucleo: idNucleo ?? this.idNucleo,
+      nomePlcode: nomePlcode ?? this.nomePlcode,
+      nomeNucleo: nomeNucleo ?? this.nomeNucleo,
+      nomeUnidade: nomeUnidade ?? this.nomeUnidade,
+      nomeEmpresa: nomeEmpresa ?? this.nomeEmpresa,
+      statusPlcode: statusPlcode ?? this.statusPlcode,
+      parametros: parametros ?? this.parametros,
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        idPlcode,
+        idNucleo,
+        nomePlcode,
+        nomeNucleo,
+        nomeUnidade,
+        nomeEmpresa,
+        statusPlcode,
+        parametros,
+      ];
+}

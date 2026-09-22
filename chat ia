@@ -1,0 +1,12 @@
+step ia 
+Livro ATA
+O Ask passa a receber idEmpresaUnidade, idsEmpresaUnidade, turnoAberto, anotacaoHoje, idLivroAta e idAnotacaoHoje. A ponte aceita selectRow nos projetos. O dialog de criar anotação continua o mesmo.
+
+Tickets
+ticketFilters no formato da web (dateFrom, dateTo, status, projeto). O chat pode filtrar status, período e projeto, e abrir o detalhe (ticket-detail). Criar ticket pelo sheet nativo não mudou. Motivo não virou filtro na lista — a tela não tem esse campo e esconderia tickets sem como limpar.
+
+Leituras
+Selection com as chaves da web. Fora de faixa, fonte e período seguem iguais. Projeto/núcleo/PLCode/busca só entram se o chat pedir; mudar período ou manual/IoT na tela limpa esses extras.
+
+Tarefas
+Já estava perto. Entende periodo: hoje e renderTable. Form e filtros da aba intactos.

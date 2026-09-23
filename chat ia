@@ -10,3 +10,29 @@ Selection com as chaves da web. Fora de faixa, fonte e período seguem iguais. P
 
 Tarefas
 Já estava perto. Entende periodo: hoje e renderTable. Form e filtros da aba intactos.
+
+chat ia GAIA
+Onde o web vai além
+1. Onde o chat vive
+Web: widget flutuante em qualquer tela logada (NlwebChatLauncher).
+App: só AppBar do Home. Depois de um push (detalhe de ticket, produto, scanner) não há ga.ia — decisão igual ao STEP.
+
+2. “Analisar com GAIA”
+Web manda pergunta pronta (autoSend) com o recorte da página: leituras, tickets, tarefas, livro ATA, produto, cockpits, visita, MyLIMS, documentos, projetos, home.
+App não tem esse botão. O usuário só digita no sheet.
+
+3. Snapshot de tela
+Web grava persistGaiaScreenContext e mantém núcleo, PLCode, período, fonte, cockpit, documento nos turnos seguintes.
+App só reaproveita o que a aba já patchou:
+
+Leituras: datas, status, fonte, ids se o chat STEP já tiver mandado
+Tickets: período, ticket expandido/detalhe
+Tarefas / livro ATA: rota + projeto
+Produto, visita, cockpit, documento, MyLIMS: sem patchSelection no app
+4. Resposta rica (chat2)
+Web desenha gráfico, checklist e botões salvar/abrir relatório.
+App só mostra texto. O JSON structured / chat2 chega e é ignorado na UI.
+
+5. Histórico
+Web, ao abrir um item, continua a conversa (conversation_id).
+App mostra a pergunta/resposta daquele turno.

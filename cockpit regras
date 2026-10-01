@@ -12,3 +12,9 @@ Web. O card chama GET /api/dashboard/cockpits/latest ou .../latest/:idEmpresaUni
   O número em destaque é o último valor do primeiro parâmetro. 
 Em cockpit de produto essa conta não existe, porque parametros vem vazio; o gráfico usa estoque, entradas e consumo do primeiro produto. 
   Sem dado, a web oferece "Ir para Cockpits".
+
+App. A aba usa o mesmo endpoint e o mesmo filtro de projeto. As mensagens vazias são as da API. A diferença é o gráfico: qualquer tipo vira barra. 
+O gauge não diz se o valor está dentro ou fora da faixa, e a faixa não desenha mínimo, máximo e fechamento. 
+O app mostra o último estoque no cockpit de produto, coisa que o card da web não mostra. 
+Se houver vários favoritos, o app deixa trocar no seletor; a web mostra só o primeiro e manda o restante para a página de Cockpits, 
+que o app não tem.

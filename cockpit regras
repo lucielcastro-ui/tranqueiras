@@ -1,0 +1,14 @@
+Regra. GetDashboardLatestCockpitUseCase olha só os cockpits do usuário logado. 
+  Se houver favorito, devolve todos (source: favorite) e marca o primeiro como o principal. 
+Sem favorito, devolve só o mais recente (source: latest). O filtro é o projeto (idEmpresaUnidade), pelo parâmetro ou pelo produto vinculado.
+O núcleo não entra. Se o usuário tem cockpit, mas nenhum naquele projeto, a resposta é found: false com "Não há cockpit nesta empresa unidade".
+  Se não tem nenhum, a mensagem é "Não há cockpit cadastrado para este usuário". 
+  Favorito vale para leitura manual (status 0), IoT (status 1) e produto (status 2).
+
+Web. O card chama GET /api/dashboard/cockpits/latest ou .../latest/:idEmpresaUnidade. 
+  O hook recebe o núcleo do filtro do painel, mas não manda esse parâmetro na request. 
+  O serviço descarta a lista cockpits e desenha só cockpit, o primeiro. 
+  O gráfico respeita grafico_tipo: linha, área, coluna, barra, gauge, faixa (mínimo, máximo e fechamento) ou IoT. 
+  O número em destaque é o último valor do primeiro parâmetro. 
+Em cockpit de produto essa conta não existe, porque parametros vem vazio; o gráfico usa estoque, entradas e consumo do primeiro produto. 
+  Sem dado, a web oferece "Ir para Cockpits".

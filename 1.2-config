@@ -1,0 +1,494 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import 'package:step_flutter/core/l10n/app_localizations.dart';
+import 'package:step_flutter/core/util/cores.dart';
+import 'package:step_flutter/core/util/design_system.dart';
+import 'package:step_flutter/core/util/get_it.dart';
+import 'package:step_flutter/core/util/locale_utils.dart';
+import 'package:step_flutter/core/widgets/premium_list_card.dart';
+import 'package:step_flutter/core/widgets/snackbar_widget.dart';
+import 'package:step_flutter/core/widgets/texto_lato.dart';
+import 'package:step_flutter/features/configuracoes/domain/entities/configuracoes_entity.dart';
+import 'package:step_flutter/features/configuracoes/presentation/bloc/configuracoes_bloc.dart';
+import 'package:step_flutter/features/home/presentation/controller/home_controller.dart';
+import 'package:step_flutter/bootstrap.dart';
+
+class ConfiguracoesScreen extends StatelessWidget {
+  const ConfiguracoesScreen({
+    super.key,
+    this.asDrawer = false,
+    this.nomeUsuario,
+    this.fotoUsuario,
+  });
+
+  /// Quando verdadeiro, a tela ocupa o sidebar da home, sem rota própria.
+  final bool asDrawer;
+  final String? nomeUsuario;
+  final String? fotoUsuario;
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => getIt<ConfiguracoesBloc>()..add(const LoadConfiguracoes()),
+      child: _ConfiguracoesView(
+        asDrawer: asDrawer,
+        nomeUsuario: nomeUsuario,
+        fotoUsuario: fotoUsuario,
+      ),
+    );
+  }
+}
+
+class _ConfiguracoesView extends StatefulWidget {
+  const _ConfiguracoesView({
+    required this.asDrawer,
+    this.nomeUsuario,
+    this.fotoUsuario,
+  });
+
+  final bool asDrawer;
+  final String? nomeUsuario;
+  final String? fotoUsuario;
+
+  @override
+  State<_ConfiguracoesView> createState() => _ConfiguracoesViewState();
+}
+
+class _ConfiguracoesViewState extends State<_ConfiguracoesView> {
+  final HomeController _homeController = HomeController();
+  String _nomeUsuario = '';
+  String _fotoUsuario = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _aplicarUsuario(widget.nomeUsuario, widget.fotoUsuario);
+    if (widget.nomeUsuario == null || widget.fotoUsuario == null) {
+      _carregarUsuario();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _ConfiguracoesView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.nomeUsuario != oldWidget.nomeUsuario ||
+        widget.fotoUsuario != oldWidget.fotoUsuario) {
+      setState(() {
+        _aplicarUsuario(widget.nomeUsuario, widget.fotoUsuario);
+      });
+    }
+  }
+
+  void _aplicarUsuario(String? nome, String? foto) {
+    if (nome != null) _nomeUsuario = nome;
+    if (foto != null) _fotoUsuario = foto;
+  }
+
+  Future<void> _carregarUsuario() async {
+    final nome = await _homeController.getNomeUsuario();
+    final foto = await _homeController.getFotoUsuario();
+    if (!mounted) return;
+    setState(() {
+      if (widget.nomeUsuario == null) _nomeUsuario = nome;
+      if (widget.fotoUsuario == null) _fotoUsuario = foto;
+    });
+  }
+
+  String get _nomeExibicao {
+    final trimmed = _nomeUsuario.trim();
+    if (trimmed.isEmpty ||
+        trimmed.toLowerCase() == 'nulo' ||
+        trimmed.toLowerCase() == 'null') {
+      return 'Usuario';
+    }
+    return trimmed;
+  }
+
+  String get _inicial {
+    final first = _nomeExibicao.split(' ').first.trim();
+    if (first.isEmpty) return 'U';
+    return first.substring(0, 1).toUpperCase();
+  }
+
+  bool get _temFoto {
+    final foto = _fotoUsuario.trim();
+    if (foto.isEmpty) return false;
+    final lower = foto.toLowerCase();
+    return lower != 'null' && lower != 'nulo' && lower != 'img';
+  }
+
+  List<DropdownMenuEntry<String>> _createDropdownEntries(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return [
+      DropdownMenuEntry<String>(
+        value: LocaleUtils.portuguese,
+        label: l10n.configurations_portuguese,
+      ),
+      DropdownMenuEntry<String>(
+        value: LocaleUtils.english,
+        label: l10n.configurations_english,
+      ),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _perfilHeader(context),
+        Expanded(child: _configuracoesBody(context)),
+      ],
+    );
+
+    if (widget.asDrawer) {
+      return Material(
+        color: DesignSystem.grey50,
+        child: body,
+      );
+    }
+
+    final l10n = AppLocalizations.of(context)!;
+    return Scaffold(
+      backgroundColor: DesignSystem.grey50,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        title: TextoLato(
+          texto: l10n.configurations_title,
+          tamanhoTexto: 18,
+          weightTexto: FontWeight.w600,
+          corTexto: DesignSystem.grey900,
+        ),
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: DesignSystem.grey800,
+          ),
+        ),
+      ),
+      body: body,
+    );
+  }
+
+  Widget _perfilHeader(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final header = Padding(
+      padding: EdgeInsets.fromLTRB(
+        DesignSystem.spacingM,
+        DesignSystem.spacingM,
+        widget.asDrawer ? DesignSystem.spacingS : DesignSystem.spacingM,
+        DesignSystem.spacingL,
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: Colors.white.withValues(alpha: 0.2),
+            backgroundImage: _temFoto ? NetworkImage(_fotoUsuario) : null,
+            child: _temFoto
+                ? null
+                : TextoLato(
+                    texto: _inicial,
+                    tamanhoTexto: 18,
+                    weightTexto: FontWeight.w700,
+                    corTexto: Colors.white,
+                  ),
+          ),
+          const SizedBox(width: DesignSystem.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextoLato(
+                  texto: _nomeExibicao,
+                  tamanhoTexto: 18,
+                  weightTexto: FontWeight.w700,
+                  corTexto: Colors.white,
+                  maxLines: 2,
+                ),
+                TextoLato(
+                  texto: l10n.configurations_title,
+                  tamanhoTexto: 13,
+                  weightTexto: FontWeight.w500,
+                  corTexto: Colors.white.withValues(alpha: 0.8),
+                  maxLines: 1,
+                ),
+              ],
+            ),
+          ),
+          if (widget.asDrawer)
+            IconButton(
+              onPressed: () => Navigator.of(context).pop(),
+              tooltip: l10n.close,
+              icon: const Icon(Icons.close_rounded, color: Colors.white),
+            ),
+        ],
+      ),
+    );
+
+    return Container(
+      color: Cores.verdeMedio,
+      child: widget.asDrawer
+          ? SafeArea(bottom: false, child: header)
+          : header,
+    );
+  }
+
+  Widget _configuracoesBody(BuildContext context) {
+    return BlocConsumer<ConfiguracoesBloc, ConfiguracoesState>(
+        listenWhen: (previous, current) =>
+            current is ConfiguracoesLanguageChanged ||
+            current is ConfiguracoesActionError ||
+            current is ConfiguracoesError,
+        listener: (context, state) {
+          if (state is ConfiguracoesLanguageChanged) {
+            MainApp.setLocale(
+              context,
+              Locale(state.configuracoes.languageCode),
+            );
+          } else if (state is ConfiguracoesActionError) {
+            showSnackBar(context, false, state.failure.message ?? '');
+          } else if (state is ConfiguracoesError) {
+            showSnackBar(context, false, state.failure.message ?? '');
+          }
+        },
+        builder: (context, state) {
+          if (state is ConfiguracoesInitial || state is ConfiguracoesLoading) {
+            return Center(
+              child: CircularProgressIndicator(
+                color: DesignSystem.primaryGreenDark,
+              ),
+            );
+          }
+
+          if (state is ConfiguracoesError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(DesignSystem.spacingL),
+                child: TextoLato(
+                  texto: state.failure.message ?? '',
+                  tamanhoTexto: 16,
+                  weightTexto: FontWeight.w600,
+                  corTexto: DesignSystem.grey800,
+                  alinhamento: TextAlign.center,
+                  maxLines: 5,
+                ),
+              ),
+            );
+          }
+
+          if (state is! ConfiguracoesLoaded) {
+            return const SizedBox.shrink();
+          }
+
+          return _buildContent(context, state.configuracoes);
+        },
+    );
+  }
+
+  Widget _buildContent(BuildContext context, ConfiguracoesEntity configuracoes) {
+    final l10n = AppLocalizations.of(context)!;
+
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.all(DesignSystem.spacingM),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextoLato(
+              texto: l10n.configurations_language,
+              tamanhoTexto: 16,
+              weightTexto: FontWeight.w700,
+              corTexto: DesignSystem.grey900,
+            ),
+            const SizedBox(height: DesignSystem.spacingS),
+            PremiumListCard(
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(DesignSystem.spacingS),
+                    decoration: BoxDecoration(
+                      color: DesignSystem.primaryGreenLight,
+                      borderRadius:
+                          BorderRadius.circular(DesignSystem.borderRadiusM),
+                    ),
+                    child: Icon(
+                      Icons.language_rounded,
+                      color: DesignSystem.primaryGreenDark,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: DesignSystem.spacingM),
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return DropdownMenu<String>(
+                      key: ValueKey(configuracoes.languageCode),
+                      width: constraints.maxWidth,
+                      expandedInsets: EdgeInsets.zero,
+                      dropdownMenuEntries: _createDropdownEntries(context),
+                      initialSelection: configuracoes.languageCode,
+                      requestFocusOnTap: false,
+                      textStyle: const TextStyle(
+                        fontFamily: DesignSystem.fontFamily,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: DesignSystem.grey900,
+                      ),
+                      inputDecorationTheme: InputDecorationTheme(
+                        filled: true,
+                        fillColor: DesignSystem.grey50,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: DesignSystem.spacingM,
+                          vertical: DesignSystem.spacingS,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(
+                            DesignSystem.borderRadiusM,
+                          ),
+                          borderSide: const BorderSide(
+                            color: DesignSystem.grey300,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(
+                            DesignSystem.borderRadiusM,
+                          ),
+                          borderSide: const BorderSide(
+                            color: DesignSystem.grey300,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(
+                            DesignSystem.borderRadiusM,
+                          ),
+                          borderSide: BorderSide(
+                            color: DesignSystem.primaryGreen,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                      onSelected: (locale) {
+                        if (locale == null ||
+                            locale == configuracoes.languageCode) {
+                          return;
+                        }
+                        context.read<ConfiguracoesBloc>().add(
+                              ChangeLanguage(locale),
+                            );
+                      },
+                    );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: DesignSystem.spacingL),
+            TextoLato(
+              texto: l10n.permissions,
+              tamanhoTexto: 16,
+              weightTexto: FontWeight.w700,
+              corTexto: DesignSystem.grey900,
+            ),
+            const SizedBox(height: DesignSystem.spacingS),
+            PremiumListCard(
+              padding: EdgeInsets.zero,
+              child: Column(
+                children: [
+                  _permissionRow(
+                    icon: Icons.notifications_outlined,
+                    label: l10n.notification,
+                    granted: configuracoes.notificationPermission,
+                  ),
+                  const Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: DesignSystem.grey200,
+                  ),
+                  _permissionRow(
+                    icon: Icons.photo_camera_outlined,
+                    label: l10n.camera,
+                    granted: configuracoes.cameraPermission,
+                  ),
+                  const Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: DesignSystem.grey200,
+                  ),
+                  _permissionRow(
+                    icon: Icons.location_on_outlined,
+                    label: l10n.location,
+                    granted: configuracoes.locationPermission,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _permissionRow({
+    required IconData icon,
+    required String label,
+    required bool granted,
+  }) {
+    final statusColor =
+        granted ? DesignSystem.success : DesignSystem.error;
+    final statusBg = granted
+        ? DesignSystem.success.withValues(alpha: 0.12)
+        : DesignSystem.error.withValues(alpha: 0.12);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: DesignSystem.spacingM,
+        vertical: DesignSystem.spacingM,
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(DesignSystem.spacingS),
+            decoration: BoxDecoration(
+              color: DesignSystem.grey100,
+              borderRadius: BorderRadius.circular(DesignSystem.borderRadiusM),
+            ),
+            child: Icon(
+              icon,
+              color: DesignSystem.grey800,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: DesignSystem.spacingM),
+          Expanded(
+            child: TextoLato(
+              texto: label,
+              tamanhoTexto: 15,
+              weightTexto: FontWeight.w600,
+              corTexto: DesignSystem.grey900,
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(DesignSystem.spacingXS + 2),
+            decoration: BoxDecoration(
+              color: statusBg,
+              borderRadius: BorderRadius.circular(DesignSystem.borderRadiusS),
+            ),
+            child: Icon(
+              granted ? Icons.check_rounded : Icons.close_rounded,
+              color: statusColor,
+              size: 20,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

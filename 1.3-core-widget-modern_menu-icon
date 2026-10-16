@@ -1,0 +1,41 @@
+import 'package:flutter/material.dart';
+
+/// Menu com três barras arredondadas de comprimentos diferentes.
+class ModernMenuIcon extends StatelessWidget {
+  const ModernMenuIcon({
+    super.key,
+    this.color = Colors.white,
+    this.size = 18,
+  });
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final barHeight = size * 0.115;
+    final radius = BorderRadius.circular(barHeight);
+
+    Widget bar(double widthFactor) {
+      return Container(
+        width: size * widthFactor,
+        height: barHeight,
+        decoration: BoxDecoration(color: color, borderRadius: radius),
+      );
+    }
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          bar(1),
+          bar(0.62),
+          bar(0.82),
+        ],
+      ),
+    );
+  }
+}

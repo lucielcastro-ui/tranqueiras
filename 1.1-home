@@ -1,0 +1,907 @@
+import 'package:animated_bottom_navigation_bar/animated_bottom_navigation_bar.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:step_flutter/features/assistente_ia/domain/services/ponte_ui_assistente.dart';
+import 'package:step_flutter/features/assistente_ia/domain/services/sessao_contexto_ui.dart';
+import 'package:step_flutter/features/ai_assistant/presentation/utils/abrir_ai_assistant.dart';
+import 'package:step_flutter/features/assistente_ia/presentation/utils/abrir_assistente_ia.dart';
+import 'package:step_flutter/features/auth/domain/usecases/clear_auth_session_usecase.dart';
+import 'package:step_flutter/features/dashboard/presentation/bloc/dashboard_bloc.dart';
+import 'package:step_flutter/features/dashboard/presentation/screens/dashboard_screen.dart';
+import 'package:step_flutter/features/home/presentation/controller/home_controller.dart';
+import 'package:step_flutter/features/leituras/presentation/screens/leituras_pendentes_screen.dart';
+import 'package:step_flutter/features/leituras/presentation/sync_dados_leitura_controller.dart';
+import 'package:step_flutter/features/leituras/presentation/widgets/sync_dados_leitura_card.dart';
+import 'package:step_flutter/features/tasks/presentation/bloc/task_bloc.dart';
+import 'package:step_flutter/features/tasks/presentation/screens/tasks_screen.dart'
+    as tasks_presentation_screen;
+import 'package:step_flutter/features/products/presentation/screens/products_screen.dart'
+    as products_presentation_screen;
+import 'package:step_flutter/features/suporte/presentation/screens/suporte_screen.dart';
+import 'package:step_flutter/core/config/app_config.dart';
+import 'package:step_flutter/core/config/app_module.dart';
+import 'package:step_flutter/core/config/feature_access.dart';
+import 'package:step_flutter/core/l10n/app_localizations.dart';
+import 'package:step_flutter/core/theme/app_text_styles.dart';
+import 'package:step_flutter/core/usecases/usecase.dart';
+import 'package:step_flutter/core/util/cores.dart';
+import 'package:step_flutter/core/util/design_system.dart';
+import 'package:step_flutter/core/util/get_it.dart';
+import 'package:step_flutter/core/util/notifications_utils/notification_service.dart';
+import 'package:step_flutter/features/auth/domain/usecases/get_logged_user_usecase.dart';
+import 'package:step_flutter/features/leituras/presentation/screens/get_leituras_screen.dart';
+import 'package:step_flutter/features/livro_ata/presentation/screens/livro_ata_screen.dart';
+import 'package:step_flutter/core/widgets/modern_menu_icon.dart';
+import 'package:step_flutter/core/widgets/snackbar_widget.dart';
+import 'package:step_flutter/core/widgets/step_gradient_button.dart';
+import 'package:step_flutter/core/widgets/texto_lato.dart';
+import 'package:step_flutter/features/configuracoes/presentation/screens/configuracoes_screen.dart';
+
+class Home extends StatefulWidget {
+  const Home({super.key, this.indexPage = 0});
+
+  final int indexPage;
+
+  @override
+  State<Home> createState() => _HomeState();
+}
+
+class _HomeState extends State<Home> {
+  final HomeController _homeController = HomeController();
+  TaskBloc? _taskBloc;
+  FeatureAccess _access = FeatureAccess(config: AppConfig.current);
+  String idUsuario = "0";
+  String nomeUsuario = "";
+  String fotoUsuario = "";
+
+  int _bottomNavIndex = 0;
+  bool _syncAutomaticoDisparado = false;
+  bool _sessionReady = false;
+  SyncDadosLeituraController? _syncDadosController;
+
+  bool get _podeVerLeituras => _access.can(AppModuleCodigo.leituras);
+  bool get _podeVerVisitas => _access.podeListarVisitas;
+  bool get _podeVerTarefas => _access.podeVerTarefas;
+  bool get _podeVerTickets => _access.can(AppModuleCodigo.ticket);
+  bool get _podeVerLivroAta => _access.can(AppModuleCodigo.livroAta);
+  bool get _podeVerProdutos =>
+      _access.can(AppModuleCodigo.produto) ||
+      _access.can(AppModuleCodigo.produtoCatalogo);
+  bool get _podeVerDashboard => _access.can(AppModuleCodigo.dashboard);
+  bool get _podeVerScanner {
+    if (_access.user == null) return false;
+    return _access.canAcao(AppModuleCodigo.leituras, AppModuleAcao.ver) ||
+        _access.canAcao(AppModuleCodigo.qrcode, AppModuleAcao.ver);
+  }
+
+  List<_HomeAba> get _abas {
+    return [
+      const _HomeAba(
+        kind: _HomeAbaKind.home,
+        icon: Icons.home_outlined,
+        rota: '/home',
+      ),
+      if (_podeVerTarefas)
+        const _HomeAba(
+          kind: _HomeAbaKind.tasks,
+          icon: Icons.alarm,
+          rota: '/tarefas',
+        ),
+      if (_podeVerTickets)
+        const _HomeAba(
+          kind: _HomeAbaKind.suporte,
+          icon: Icons.confirmation_num_outlined,
+          rota: '/tickets',
+        ),
+      if (_podeVerLivroAta)
+        const _HomeAba(
+          kind: _HomeAbaKind.livroAta,
+          icon: Icons.book_outlined,
+          rota: '/livro-ata',
+        ),
+      if (_podeVerLeituras)
+        const _HomeAba(
+          kind: _HomeAbaKind.leituras,
+          icon: Icons.analytics_outlined,
+          rota: '/leituras',
+        ),
+    ];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (getIt.isRegistered<TaskBloc>()) {
+      _taskBloc = getIt<TaskBloc>();
+    }
+    if (getIt.isRegistered<SyncDadosLeituraController>()) {
+      _syncDadosController = getIt<SyncDadosLeituraController>();
+    }
+    _bottomNavIndex = widget.indexPage;
+    NotificationService().init(context);
+    _initNivelUsuario();
+    _atualizarRotaAssistente();
+    _registrarPonteAssistente();
+  }
+
+  void _irParaAba(int index) {
+    final maxIndex = _getMaxIndex();
+    final destino = index.clamp(0, maxIndex);
+    if (!mounted) return;
+    setState(() => _bottomNavIndex = destino);
+    _atualizarRotaAssistente();
+  }
+
+  int? _indicePorRotaOuSchema(String raw) {
+    final value = raw.trim().toLowerCase();
+    if (value.isEmpty) return null;
+    final path = value.startsWith('/') ? value : '/$value';
+    if (path == '/home' || path == '/' || value == 'home') {
+      return _indiceDaAba(_HomeAbaKind.home);
+    }
+    if (path == '/tarefas' || value == 'tarefas' || value == 'tasks') {
+      return _indiceDaAba(_HomeAbaKind.tasks);
+    }
+    if (path == '/tickets' ||
+        value == 'tickets' ||
+        value == 'suporte' ||
+        path == '/suporte') {
+      return _indiceDaAba(_HomeAbaKind.suporte);
+    }
+    if (path == '/livro-ata' ||
+        value == 'livro-ata' ||
+        value == 'livro_ata' ||
+        value == 'livroata') {
+      return _indiceDaAba(_HomeAbaKind.livroAta);
+    }
+    if (path == '/leituras' || value == 'leituras') {
+      return _indiceDaAba(_HomeAbaKind.leituras);
+    }
+    return null;
+  }
+
+  int? _indiceDaAba(_HomeAbaKind kind) {
+    final index = _abas.indexWhere((aba) => aba.kind == kind);
+    return index >= 0 ? index : null;
+  }
+
+  Future<void> _navegarAssistente(Map<String, dynamic> payload) async {
+    final path = (payload['path'] ??
+            payload['route'] ??
+            payload['to'] ??
+            payload['href'] ??
+            '')
+        .toString();
+    final schema =
+        (payload['schemaId'] ?? payload['schema'] ?? payload['target'] ?? '')
+            .toString();
+    final index =
+        _indicePorRotaOuSchema(path) ?? _indicePorRotaOuSchema(schema);
+    if (index == null) return;
+    _irParaAba(index);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  Future<void> _abrirScannerAssistente() async {
+    if (!mounted) return;
+    if (!_podeVerScanner) return;
+    final leituras = _indiceDaAba(_HomeAbaKind.leituras);
+    if (leituras != null) {
+      _irParaAba(leituras);
+    }
+    await Navigator.pushNamed(context, '/scannerScreen');
+  }
+
+  void _registrarPonteAssistente() {
+    final ponte = getIt<PonteUiAssistente>();
+    ponte.registrar('navigate', null, _navegarAssistente);
+    ponte.registrar('navigate', '*', _navegarAssistente);
+    ponte.registrar(
+      'openModal',
+      'leitura-create',
+      (_) => _abrirScannerAssistente(),
+    );
+    ponte.registrar(
+      'openPanel',
+      'leitura-create',
+      (_) => _abrirScannerAssistente(),
+    );
+    ponte.registrar(
+      'openModal',
+      'plcode-scan',
+      (_) => _abrirScannerAssistente(),
+    );
+    ponte.registrar(
+      'openPanel',
+      'scanner',
+      (_) => _abrirScannerAssistente(),
+    );
+  }
+
+  void _removerPonteAssistente() {
+    final ponte = getIt<PonteUiAssistente>();
+    ponte.remover('navigate');
+    ponte.remover('navigate', '*');
+    ponte.remover('openModal', 'leitura-create');
+    ponte.remover('openPanel', 'leitura-create');
+    ponte.remover('openModal', 'plcode-scan');
+    ponte.remover('openPanel', 'scanner');
+  }
+
+  void _atualizarRotaAssistente() {
+    final sessao = getIt<SessaoContextoUi>();
+    final abas = _abas;
+    if (_bottomNavIndex >= 0 && _bottomNavIndex < abas.length) {
+      sessao.definirRota(abas[_bottomNavIndex].rota);
+    } else {
+      sessao.definirRota('/home');
+    }
+  }
+
+  @override
+  void dispose() {
+    _removerPonteAssistente();
+    _taskBloc?.close();
+    super.dispose();
+  }
+
+  void _initNivelUsuario() async {
+    final id = await _homeController.getIdUsuario();
+    final nome = await _homeController.getNomeUsuario();
+    final foto = await _homeController.getFotoUsuario();
+    final userResult = await getIt<GetLoggedUserUsecase>()(NoParams());
+    if (mounted) {
+      setState(() {
+        idUsuario = id;
+        nomeUsuario = nome;
+        fotoUsuario = foto;
+        _sessionReady = true;
+        userResult.fold(
+          (_) {},
+          (user) {
+            _access = FeatureAccess(
+              config: AppConfig.current,
+              user: user,
+            );
+          },
+        );
+
+        final maxIndex = _getMaxIndex();
+        if (_bottomNavIndex > maxIndex) {
+          _bottomNavIndex = 0;
+        }
+      });
+      _dispararSincronizacaoAutomatica(id);
+    }
+  }
+
+  void _dispararSincronizacaoAutomatica(String id) {
+    final sync = _syncDadosController;
+    if (sync == null || !_podeVerLeituras) return;
+    if (_syncAutomaticoDisparado) return;
+    if (id.isEmpty || id == '0') return;
+    _syncAutomaticoDisparado = true;
+    sync.sincronizar(id);
+  }
+
+  Future<void> _sincronizarDadosMestresManual() async {
+    final sync = _syncDadosController;
+    if (sync == null || !_podeVerLeituras) return;
+    if (sync.sincronizando) return;
+    if (idUsuario.isEmpty || idUsuario == '0') return;
+
+    await sync.sincronizar(idUsuario);
+    if (!mounted) return;
+
+    final msg = sync.mensagemStatus;
+    if (msg != null) {
+      showSnackBar(
+        context,
+        sync.ultimoSucesso,
+        msg,
+        embaixo: true,
+      );
+    }
+  }
+
+  List<Widget> _buildTabChildren(double largura) {
+    final userId = int.tryParse(idUsuario) ?? 0;
+    final children = <Widget>[];
+    for (final aba in _abas) {
+      switch (aba.kind) {
+        case _HomeAbaKind.home:
+          children.add(buildTelaInicial(largura));
+          break;
+        case _HomeAbaKind.tasks:
+          final bloc = _taskBloc;
+          if (bloc == null) {
+            children.add(const SizedBox.shrink());
+            break;
+          }
+          children.add(
+            BlocProvider<TaskBloc>.value(
+              value: bloc,
+              child: tasks_presentation_screen.TasksScreen(
+                idUser: userId,
+                isTabActive: _bottomNavIndex == children.length,
+                onNavigateToTasksTab: () {
+                  final index = _indiceDaAba(_HomeAbaKind.tasks);
+                  if (index != null) _irParaAba(index);
+                },
+              ),
+            ),
+          );
+          break;
+        case _HomeAbaKind.suporte:
+          children.add(
+            SuporteScreen(
+              isTabActive: _bottomNavIndex == children.length,
+              onNavigateToTicketsTab: () {
+                final index = _indiceDaAba(_HomeAbaKind.suporte);
+                if (index != null) _irParaAba(index);
+              },
+            ),
+          );
+          break;
+        case _HomeAbaKind.livroAta:
+          children.add(
+            LivroAtaScreen(
+              isTabActive: _bottomNavIndex == children.length,
+              onNavigateToLivroAtaTab: () {
+                final index = _indiceDaAba(_HomeAbaKind.livroAta);
+                if (index != null) _irParaAba(index);
+              },
+            ),
+          );
+          break;
+        case _HomeAbaKind.leituras:
+          children.add(
+            LeiturasScreen(
+              isTabActive: _bottomNavIndex == children.length,
+              onNavigateToLeiturasTab: () {
+                final index = _indiceDaAba(_HomeAbaKind.leituras);
+                if (index != null) _irParaAba(index);
+              },
+            ),
+          );
+          break;
+      }
+    }
+    return children;
+  }
+
+  List<IconData> get _iconesAtuais => _abas.map((aba) => aba.icon).toList();
+
+  int _getMaxIndex() {
+    final count = _abas.length;
+    return count == 0 ? 0 : count - 1;
+  }
+
+  String get _primeiroNome {
+    final trimmed = nomeUsuario.trim();
+    if (trimmed.isEmpty ||
+        trimmed.toLowerCase() == 'nulo' ||
+        trimmed.toLowerCase() == 'null') {
+      return 'Usuario';
+    }
+    return trimmed.split(' ').first;
+  }
+
+  Widget _buildHomeActionCard({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+  }) {
+    final borderRadius = BorderRadius.circular(DesignSystem.borderRadiusXL);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: borderRadius,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: DesignSystem.card,
+            borderRadius: borderRadius,
+            border: Border.all(color: DesignSystem.border),
+            boxShadow: DesignSystem.shadowLight,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(DesignSystem.spacingM),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: DesignSystem.iconVibrant.copyWith(
+                    borderRadius: BorderRadius.circular(
+                      DesignSystem.borderRadius2XL,
+                    ),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 20,
+                    color: DesignSystem.primaryGreen,
+                  ),
+                ),
+                const SizedBox(height: DesignSystem.spacingS),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.itemTitle,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildTelaInicial(double largura) {
+    final userId = int.tryParse(idUsuario) ?? 0;
+    final crossAxisCount = largura >= 980
+        ? 4
+        : largura >= 640
+            ? 3
+            : 2;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        DesignSystem.spacingM,
+        60,
+        DesignSystem.spacingM,
+        DesignSystem.spacingM,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_syncDadosController == null || !_podeVerLeituras)
+            const SizedBox.shrink()
+          else
+            ListenableBuilder(
+              listenable: _syncDadosController!,
+              builder: (context, _) {
+                final sync = _syncDadosController!;
+                if (idUsuario.isEmpty || idUsuario == '0') {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: DesignSystem.spacingM),
+                  child: SyncDadosLeituraCard(
+                    sincronizando: sync.sincronizando,
+                    progress: sync.progress,
+                    mensagemStatus: sync.mensagemStatus,
+                    sucesso: sync.sincronizando
+                        ? null
+                        : (sync.exibirCard ? sync.ultimoSucesso : null),
+                    onSync: _sincronizarDadosMestresManual,
+                  ),
+                );
+              },
+            ),
+          Expanded(
+            child: GridView.count(
+              crossAxisCount: crossAxisCount,
+              crossAxisSpacing: DesignSystem.spacingM,
+              mainAxisSpacing: DesignSystem.spacingM,
+              childAspectRatio: 1.05,
+              children: [
+                if (_podeVerProdutos)
+                  _buildHomeActionCard(
+                    icon: Icons.inventory_2_outlined,
+                    title: 'Produtos',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              products_presentation_screen.ProductsScreen(
+                            idUser: userId > 0 ? userId : 1,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                if (_podeVerDashboard)
+                  _buildHomeActionCard(
+                    icon: Icons.space_dashboard_outlined,
+                    title: 'Dashboard',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => BlocProvider(
+                            create: (_) => getIt<DashboardBloc>()
+                              ..add(const DashboardStarted()),
+                            child: const DashboardScreen(),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                if (_podeVerVisitas)
+                  _buildHomeActionCard(
+                    icon: Icons.location_on_outlined,
+                    title: 'Visitas',
+                    onTap: () {
+                      Navigator.pushNamed(context, '/visitas');
+                    },
+                  ),
+                _buildHomeActionCard(
+                  icon: Icons.help_outline_rounded,
+                  title: AppLocalizations.of(context)!.plcode_message_title,
+                  onTap: () {
+                    Navigator.pushNamed(context, "/instrucoes");
+                  },
+                ),
+                if (_podeVerLeituras)
+                  _buildHomeActionCard(
+                    icon: Icons.cloud_upload_outlined,
+                    title: 'Leituras Offline',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LeiturasPendentesScreen(),
+                        ),
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performLogout() async {
+    await getIt<ClearAuthSessionUsecase>()();
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/auth/login');
+  }
+
+  Future<void> _confirmLogout() async {
+    final l10n = AppLocalizations.of(context)!;
+    final isPt = Localizations.localeOf(context).languageCode == 'pt';
+    final message = isPt
+        ? 'Tem certeza que deseja sair da conta?'
+        : 'Are you sure you want to log out?';
+    final subtitle = isPt
+        ? 'Você precisará entrar novamente para acessar o app.'
+        : 'You will need to sign in again to access the app.';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      useSafeArea: false,
+      builder: (ctx) {
+        final maxHeight = MediaQuery.sizeOf(ctx).height * 0.9;
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: DesignSystem.card,
+                    borderRadius:
+                        BorderRadius.circular(DesignSystem.borderRadiusXL),
+                    border: Border.all(color: DesignSystem.border),
+                    boxShadow: DesignSystem.shadowMedium,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 8, 0),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: DesignSystem.iconHeaderSize,
+                              height: DesignSystem.iconHeaderSize,
+                              decoration: DesignSystem.iconVibrant,
+                              child: Icon(
+                                Icons.logout_rounded,
+                                size: 20,
+                                color: DesignSystem.primaryGreen,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                l10n.options_menu_logout,
+                                style: AppTextStyles.cardTitle,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              tooltip: l10n.minute_book_cancel,
+                              icon: const Icon(Icons.close_rounded),
+                              color: DesignSystem.mutedFg,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(DesignSystem.spacingM),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              message,
+                              style:
+                                  AppTextStyles.itemTitle.copyWith(height: 1.4),
+                            ),
+                            const SizedBox(height: DesignSystem.spacingS),
+                            Text(
+                              subtitle,
+                              style: AppTextStyles.meta.copyWith(height: 1.45),
+                            ),
+                            const SizedBox(height: DesignSystem.spacingM),
+                            StepGradientButton(
+                              label: l10n.options_menu_logout,
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (confirmed == true && mounted) {
+      await _performLogout();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_sessionReady) {
+      return Scaffold(
+        backgroundColor: Cores.verdeMedio,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
+    var largura = MediaQuery.of(context).size.width;
+
+    final saudacao = Localizations.localeOf(context).languageCode == 'en'
+        ? 'Hello, $_primeiroNome'
+        : 'Olá, $_primeiroNome';
+
+    return Container(
+      color: Colors.white,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Cores.cinzaClaro.withValues(alpha: 0.1),
+              Cores.cinzaClaro.withValues(alpha: 0.15),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Scaffold(
+          backgroundColor: DesignSystem.grey50,
+          onDrawerChanged: (aberto) {
+            if (aberto) {
+              getIt<SessaoContextoUi>().definirRota('/configuracao');
+            } else {
+              _atualizarRotaAssistente();
+            }
+          },
+          drawer: Drawer(
+            width: largura,
+            backgroundColor: DesignSystem.grey50,
+            child: ConfiguracoesScreen(
+              asDrawer: true,
+              nomeUsuario: nomeUsuario,
+              fotoUsuario: fotoUsuario,
+            ),
+          ),
+          body: Column(
+            children: [
+              Container(
+                color: Cores.verdeMedio,
+                padding: const EdgeInsets.fromLTRB(
+                  DesignSystem.spacingM,
+                  DesignSystem.spacingL + 24,
+                  DesignSystem.spacingM,
+                  DesignSystem.spacingL,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Builder(
+                      builder: (menuContext) {
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => Scaffold.of(menuContext).openDrawer(),
+                            borderRadius: BorderRadius.circular(
+                              DesignSystem.borderRadiusL,
+                            ),
+                            child: SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: Center(
+                                child: Semantics(
+                                  label: AppLocalizations.of(context)!
+                                      .options_menu_configurations,
+                                  button: true,
+                                  child: const ModernMenuIcon(
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: DesignSystem.spacingM),
+                    Expanded(
+                      child: TextoLato(
+                        texto: saudacao,
+                        tamanhoTexto: 18,
+                        weightTexto: FontWeight.w700,
+                        corTexto: Colors.white,
+                        maxLines: 1,
+                      ),
+                    ),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => AppConfig.current.isGaia
+                            ? abrirAiAssistant(context)
+                            : abrirAssistenteIa(context),
+                        borderRadius: BorderRadius.circular(
+                          DesignSystem.borderRadiusL,
+                        ),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Center(
+                            child: Icon(
+                            Icons.smart_toy_rounded,
+                            color: Colors.white,
+                            size: 22,
+                            semanticLabel:
+                                AppConfig.current.isGaia ? 'ga.ia' : 'step.ia',
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: DesignSystem.spacingS),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _confirmLogout,
+                        borderRadius: BorderRadius.circular(
+                          DesignSystem.borderRadiusL,
+                        ),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Center(
+                            child: Icon(
+                            Icons.logout_rounded,
+                            color: Colors.white,
+                            size: 22,
+                            semanticLabel: AppLocalizations.of(context)!
+                                .options_menu_logout,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Container(
+                  color: Cores.verdeMedio,
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(40),
+                    ),
+                    child: Container(
+                      color: DesignSystem.grey50,
+                      child: Builder(
+                        builder: (context) {
+                          final tabs = _buildTabChildren(largura);
+                          final index = tabs.isEmpty
+                              ? 0
+                              : _bottomNavIndex.clamp(0, tabs.length - 1);
+                          return IndexedStack(
+                            index: index,
+                            children: tabs,
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.endDocked,
+          floatingActionButton: _podeVerScanner
+              ? SizedBox(
+                  height: 65,
+                  width: 65,
+                  child: FloatingActionButton(
+                    heroTag: 'home_scanner_fab',
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    backgroundColor: Cores.verdeMedio,
+                    child: SvgPicture.asset(
+                      "assets/icons/PLCode.svg",
+                      width: 40,
+                      height: 40,
+                    ),
+                    onPressed: () async {
+                      await Navigator.pushNamed(context, "/scannerScreen");
+                    },
+                  ),
+                )
+              : null,
+          bottomNavigationBar: _iconesAtuais.length >= 2
+              ? AnimatedBottomNavigationBar(
+                  gapWidth: _podeVerScanner ? 90 : 0,
+                  backgroundColor: Colors.white,
+                  height: 60,
+                  icons: _iconesAtuais,
+                  activeIndex: _bottomNavIndex.clamp(0, _getMaxIndex()),
+                  gapLocation:
+                      _podeVerScanner ? GapLocation.end : GapLocation.none,
+                  notchSmoothness: NotchSmoothness.softEdge,
+                  onTap: (index) {
+                    _irParaAba(index);
+                  },
+                  iconSize: 28,
+                  splashColor: Cores.verdeClaro,
+                  inactiveColor: Cores.textoPadrao,
+                  activeColor: Cores.verdeEscuro,
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+}
+
+enum _HomeAbaKind { home, tasks, suporte, livroAta, leituras }
+
+class _HomeAba {
+  final _HomeAbaKind kind;
+  final IconData icon;
+  final String rota;
+
+  const _HomeAba({
+    required this.kind,
+    required this.icon,
+    required this.rota,
+  });
+}
